@@ -1,0 +1,169 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+enum UserRole {
+  admin
+  cashier
+  accountant
+}
+
+enum SlipStatus {
+  issued
+  paid
+  cancelled
+  expired
+}
+
+enum PartnerTxDirection {
+  in
+  out
+}
+
+enum ReconciliationStatus {
+  pending
+  confirmed
+  disputed
+}
+
+model User {
+  id           String   @id @default(cuid())
+  username     String   @unique
+  passwordHash String
+  role         UserRole @default(cashier)
+  isActive     Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Currency {
+  code String @id // AFN, USD, IRR, PKR, TOMAN, ...
+  name String
+  isActive Boolean @default(true)
+
+  accounts CustomerAccount[]
+  deposits DepositTransaction[]
+  slips Slip[]
+  partnerAccounts PartnerAccount[]
+  partnerTransactions PartnerTransaction[]
+}
+
+model Customer {
+  id        String  @id @default(cuid())
+  fullName  String
+  phone     String?
+  idNumber  String?
+  notes     String?
+
+  accounts CustomerAccount[]
+  deposits DepositTransaction[]
+  slips Slip[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model CustomerAccount {
+  id String @id @default(cuid())
+
+  customerId String
+  currencyCode String
+  balance Decimal @default(0)
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  currency Currency @relation(fields: [currencyCode], references: [code], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([customerId, currencyCode])
+}
+
+model DepositTransaction {
+  id String @id @default(cuid())
+  customerId String
+  currencyCode String
+  amount Decimal
+  note String?
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  currency Currency @relation(fields: [currencyCode], references: [code], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+}
+
+model Slip {
+  id String @id @default(cuid())
+  slipCode String @unique
+  customerId String
+  currencyCode String
+  amount Decimal
+  receiverName String?
+  note String?
+  status SlipStatus @default(issued)
+  paidAt DateTime?
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  currency Currency @relation(fields: [currencyCode], references: [code], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Partner {
+  id String @id @default(cuid())
+  name String
+  country String?
+  city String?
+  contact String?
+  notes String?
+
+  accounts PartnerAccount[]
+  transactions PartnerTransaction[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model PartnerAccount {
+  id String @id @default(cuid())
+  partnerId String
+  currencyCode String
+  balance Decimal @default(0)
+
+  partner Partner @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  currency Currency @relation(fields: [currencyCode], references: [code], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([partnerId, currencyCode])
+}
+
+model PartnerTransaction {
+  id String @id @default(cuid())
+  partnerId String
+  currencyCode String
+  amount Decimal
+  direction PartnerTxDirection
+  beneficiaryName String?
+  referenceNo String?
+  note String?
+  reconciliationStatus ReconciliationStatus @default(pending)
+
+  partner Partner @relation(fields: [partnerId], references: [id], onDelete: Restrict)
+  currency Currency @relation(fields: [currencyCode], references: [code], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+}
