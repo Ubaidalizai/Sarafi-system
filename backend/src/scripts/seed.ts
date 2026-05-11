@@ -3,6 +3,7 @@ import { prisma } from "../db";
 async function main() {
   const currencies = [
     { code: "AFN", name: "Afghani" },
+    { code: "AED", name: "UAE Darham" },
     { code: "USD", name: "US Dollar" },
     { code: "IRR", name: "Iranian Rial" },
     { code: "PKR", name: "Pakistani Rupee" },

@@ -938,6 +938,12 @@ textarea {
 }
 
 /* Polished dropdowns (RTL-friendly); matches app teal theme */
+/* Pashto / RTL customer names in <select>: stable alignment with Latin id suffixes */
+.sarafiSelectCustomer {
+  text-align: start;
+  unicode-bidi: plaintext;
+}
+
 .sarafiSelect {
   width: 100%;
   max-width: 100%;
@@ -1055,6 +1061,78 @@ textarea {
 .slipsReportActions {
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.customerProfileLink {
+  color: inherit;
+  font-weight: inherit;
+  text-decoration: none;
+}
+
+.customerProfileLink:hover {
+  text-decoration: underline;
+  color: var(--primary, #00a8a8);
+}
+
+.customerDetailHeader {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.customerDetailHeaderRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.customerDetailBack {
+  align-self: flex-start;
+}
+
+.customerDetailNotes {
+  margin: 8px 0 0;
+  font-size: 14px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.customerDetailTableWrap {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+}
+
+.customerDetailNoteCell {
+  white-space: normal;
+  max-width: 280px;
+  word-break: break-word;
+}
+
+/* د سليپ راپور — narrow screens: horizontal scroll, card never blows out layout */
+.slipsReportCard {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.slipsReportTableWrap {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  margin-top: 12px;
+  overflow-x: auto;
+  overflow-y: visible;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+}
+
+.slipsReportTableWrap .customerTable {
+  min-width: 1020px;
 }
 
 .slipsPayoutBtn {
@@ -1821,6 +1899,68 @@ textarea {
   padding-inline-end: 4px;
   margin-inline-end: -4px;
   -webkit-overflow-scrolling: touch;
+}
+
+.recordDetailScroll {
+  max-height: min(70vh, 560px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 4px 2px 12px;
+}
+
+.recordDetailNarrative {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: rgba(0, 105, 105, 0.08);
+  border: 1px solid rgba(0, 105, 105, 0.18);
+  line-height: 1.65;
+  font-size: 14px;
+  color: var(--text, #1a2a2a);
+}
+
+.recordDetailDl {
+  display: grid;
+  grid-template-columns: minmax(110px, 32%) 1fr;
+  gap: 10px 16px;
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.recordDetailDl--nested {
+  font-size: 13px;
+  margin-top: 4px;
+}
+
+.recordDetailDl dt {
+  margin: 0;
+  font-weight: 700;
+  color: var(--text-soft, #5a6b6b);
+}
+
+.recordDetailDl dd {
+  margin: 0;
+  word-break: break-word;
+}
+
+.recordDetailNested {
+  padding-inline-start: 10px;
+  border-inline-start: 2px solid rgba(0, 168, 168, 0.28);
+}
+
+.recordDetailEmpty {
+  opacity: 0.55;
+}
+
+.recordDetailList {
+  margin: 0;
+  padding-inline-start: 20px;
+}
+
+.recordDetailScalar {
+  margin: 0;
+  word-break: break-word;
 }
 
 .modalTitle {

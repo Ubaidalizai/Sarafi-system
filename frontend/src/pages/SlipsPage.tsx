@@ -2,40 +2,16 @@ import type { Dispatch, FormEvent, SetStateAction } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { FormModal } from "../components/FormModal";
 import { PaginationControls } from "../components/PaginationControls";
-
-function IconClock() {
-  return (
-    <svg className="slipPaidSvg" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
-      <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="2" />
-      <path fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" d="M12 7v6l4 2" />
-    </svg>
-  );
-}
-
-function IconPaid() {
-  return (
-    <svg className="slipPaidSvg" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
-      <rect x="2.5" y="6" width="19" height="12" rx="2.5" fill="none" stroke="currentColor" strokeWidth="2" />
-      <circle cx="12" cy="12" r="2.8" fill="none" stroke="currentColor" strokeWidth="1.6" />
-      <path fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" d="M6 9v6M18 9v6" />
-    </svg>
-  );
-}
-
-function IconCheckCircle() {
-  return (
-    <svg className="slipPaidCheckSvg" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
-      <circle cx="12" cy="12" r="10" fill="currentColor" opacity="0.15" />
-      <path fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" d="M8 12l3 3 5-6" />
-    </svg>
-  );
-}
+import { RawDetailModal } from "../components/RawDetailModal";
+import { buildCustomerOptionLabels } from "../lib/customerSelectLabels";
+import { formatGregorianDate } from "../lib/formatDate";
 
 function parseSlipAmount(value: string) {
   const normalized = value
     .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 1776))
     .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 1632))
     .replace(/٬/g, "")
+    .replace(/,/g, "")
     .replace(/،/g, ".")
     .trim();
   const n = Number(normalized);
@@ -51,6 +27,7 @@ type Slip = {
   status: "issued" | "paid" | "cancelled" | "expired";
   createdAt: string;
   receiverName?: string | null;
+  paidToName?: string | null;
   note?: string | null;
   customer?: { fullName: string; phone?: string | null };
 };
@@ -59,13 +36,13 @@ type Props = {
   t: (key: string) => string;
   customers: Array<{ id: string; fullName: string }>;
   currencies: Array<{ code: string }>;
+  slipCustomerAccounts: Array<{ id: string; currencyCode: string; balance: string }>;
   slipForm: {
     customerId: string;
     currencyCode: string;
     amount: string;
     receiverName: string;
-    receiverTazkira: string;
-    receiverPhone: string;
+    paidToName: string;
     note: string;
     markPaid: boolean;
   };
@@ -75,8 +52,7 @@ type Props = {
       currencyCode: string;
       amount: string;
       receiverName: string;
-      receiverTazkira: string;
-      receiverPhone: string;
+      paidToName: string;
       note: string;
       markPaid: boolean;
     }>
@@ -102,7 +78,14 @@ type Props = {
   slipMutating: boolean;
   onUpdateSlip: (
     slipCode: string,
-    payload: { customerId: string; currencyCode: string; amount: number; receiverName: string; note: string }
+    payload: {
+      customerId: string;
+      currencyCode: string;
+      amount: number;
+      receiverName: string;
+      paidToName: string;
+      note: string;
+    }
   ) => Promise<boolean>;
   onDeleteSlip: (slipCode: string) => Promise<boolean>;
 };
@@ -112,6 +95,7 @@ export function SlipsPage(props: Props) {
     t,
     customers,
     currencies,
+    slipCustomerAccounts,
     slipForm,
     setSlipForm,
     slipSaving,
@@ -136,15 +120,18 @@ export function SlipsPage(props: Props) {
     currencyCode: "AFN",
     amount: "",
     receiverName: "",
+    paidToName: "",
     note: "",
   });
   const [slipsPage, setSlipsPage] = useState(1);
+  const [rawDetail, setRawDetail] = useState<{ title: string; record: unknown } | null>(null);
   const pageSize = 10;
   const pagedSlips = useMemo(() => slips.slice((slipsPage - 1) * pageSize, slipsPage * pageSize), [slips, slipsPage]);
   const activeFilterCount = useMemo(
     () => [slipFilters.customerId, slipFilters.status, slipFilters.currencyCode, slipFilters.from, slipFilters.to].filter(Boolean).length,
     [slipFilters]
   );
+  const customerOptionLabels = useMemo(() => buildCustomerOptionLabels(customers), [customers]);
   const clearSlipFilters = () => {
     setSlipFilters({ customerId: "", status: "", currencyCode: "", from: "", to: "" });
     setSlipsPage(1);
@@ -173,6 +160,7 @@ export function SlipsPage(props: Props) {
       currencyCode: slip.currencyCode,
       amount: String(Number(slip.amount)),
       receiverName: slip.receiverName?.trim() || "",
+      paidToName: slip.paidToName?.trim() || "",
       note: slip.note?.trim() || "",
     });
     setEditModalOpen(true);
@@ -182,12 +170,13 @@ export function SlipsPage(props: Props) {
     e.preventDefault();
     if (!editSlipCode) return;
     const amount = parseSlipAmount(editForm.amount);
-    if (!editForm.customerId || !amount || amount <= 0) return;
+    if (!editForm.customerId || !amount || amount <= 0 || !editForm.receiverName.trim() || !editForm.paidToName.trim()) return;
     const ok = await onUpdateSlip(editSlipCode, {
       customerId: editForm.customerId,
       currencyCode: editForm.currencyCode,
       amount,
       receiverName: editForm.receiverName.trim(),
+      paidToName: editForm.paidToName.trim(),
       note: editForm.note.trim(),
     });
     if (ok) {
@@ -223,7 +212,9 @@ export function SlipsPage(props: Props) {
           <label>
             {t("selectCustomer")}
             <select
-              className="sarafiSelect"
+              className="sarafiSelect sarafiSelectCustomer"
+              dir="rtl"
+              lang="ps"
               value={slipForm.customerId}
               onChange={(e) => setSlipForm((p) => ({ ...p, customerId: e.target.value }))}
               required
@@ -231,11 +222,29 @@ export function SlipsPage(props: Props) {
               <option value="">—</option>
               {customers.map((customer) => (
                 <option key={customer.id} value={customer.id}>
-                  {customer.fullName}
+                  {customerOptionLabels.get(customer.id) ?? customer.fullName}
                 </option>
               ))}
             </select>
           </label>
+          {slipForm.customerId ? (
+            <div className="depositBalanceCustomerBox" role="status" style={{ marginBottom: "12px" }}>
+              <div className="depositBalanceCustomerLabel">{t("slipIssueBalanceHint")}</div>
+              {slipCustomerAccounts.length === 0 ? (
+                <div className="emptyText">{t("noBalances")}</div>
+              ) : (
+                <ul style={{ margin: "8px 0 0", paddingInlineStart: "20px", lineHeight: 1.6 }}>
+                  {slipCustomerAccounts.map((acc) => (
+                    <li key={acc.id}>
+                      <strong>{acc.currencyCode}</strong>
+                      {": "}
+                      {Number(acc.balance).toLocaleString("fa-AF")}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ) : null}
           <label>
             {t("currency")}
             <select
@@ -262,7 +271,7 @@ export function SlipsPage(props: Props) {
             />
           </label>
           <label>
-            {t("receiverName")}
+            {t("accountName")}
             <input
               value={slipForm.receiverName}
               onChange={(e) => setSlipForm((p) => ({ ...p, receiverName: e.target.value }))}
@@ -270,18 +279,11 @@ export function SlipsPage(props: Props) {
             />
           </label>
           <label>
-            {t("receiverTazkira")}
+            {t("slipPaidToName")}
             <input
-              value={slipForm.receiverTazkira}
-              onChange={(e) => setSlipForm((p) => ({ ...p, receiverTazkira: e.target.value }))}
+              value={slipForm.paidToName}
+              onChange={(e) => setSlipForm((p) => ({ ...p, paidToName: e.target.value }))}
               required
-            />
-          </label>
-          <label>
-            {t("receiverPhone")}
-            <input
-              value={slipForm.receiverPhone}
-              onChange={(e) => setSlipForm((p) => ({ ...p, receiverPhone: e.target.value }))}
             />
           </label>
           <label>
@@ -292,64 +294,6 @@ export function SlipsPage(props: Props) {
               onChange={(e) => setSlipForm((p) => ({ ...p, note: e.target.value }))}
             />
           </label>
-          <div className="slipPaidShell" role="radiogroup" aria-labelledby="slip-paid-heading">
-            <div className="slipPaidTop">
-              <p id="slip-paid-heading" className="slipPaidTitle">
-                {t("slipMoneyPaidStatus")}
-              </p>
-              <p className="slipPaidHint">{t("slipMoneyPaidHint")}</p>
-            </div>
-            <div className="slipPaidGrid">
-              <label
-                className={`slipPaidCard slipPaidCard--later ${!slipForm.markPaid ? "slipPaidCard--selected" : ""}`}
-              >
-                <input
-                  type="radio"
-                  name="slipMarkPaid"
-                  className="sr-only"
-                  checked={!slipForm.markPaid}
-                  onChange={() => setSlipForm((p) => ({ ...p, markPaid: false }))}
-                />
-                <span className="slipPaidCardAccent" aria-hidden />
-                <span className="slipPaidCardInner">
-                  <span className="slipPaidCardIconWrap slipPaidCardIconWrap--later" aria-hidden>
-                    <IconClock />
-                  </span>
-                  <span className="slipPaidCardText">
-                    <span className="slipPaidCardLabel">{t("slipNotPaidYet")}</span>
-                    <span className="slipPaidCardDesc">{t("slipNotPaidYetSub")}</span>
-                  </span>
-                  <span className="slipPaidCardMark" aria-hidden>
-                    {!slipForm.markPaid ? <IconCheckCircle /> : null}
-                  </span>
-                </span>
-              </label>
-              <label
-                className={`slipPaidCard slipPaidCard--now ${slipForm.markPaid ? "slipPaidCard--selected" : ""}`}
-              >
-                <input
-                  type="radio"
-                  name="slipMarkPaid"
-                  className="sr-only"
-                  checked={slipForm.markPaid}
-                  onChange={() => setSlipForm((p) => ({ ...p, markPaid: true }))}
-                />
-                <span className="slipPaidCardAccent" aria-hidden />
-                <span className="slipPaidCardInner">
-                  <span className="slipPaidCardIconWrap slipPaidCardIconWrap--now" aria-hidden>
-                    <IconPaid />
-                  </span>
-                  <span className="slipPaidCardText">
-                    <span className="slipPaidCardLabel">{t("slipPaidNow")}</span>
-                    <span className="slipPaidCardDesc">{t("slipPaidNowSub")}</span>
-                  </span>
-                  <span className="slipPaidCardMark" aria-hidden>
-                    {slipForm.markPaid ? <IconCheckCircle /> : null}
-                  </span>
-                </span>
-              </label>
-            </div>
-          </div>
           {slipMessage ? <div className="slipModalFeedback">{slipMessage}</div> : null}
           <div className="modalActions">
             <button className="primaryBtn" type="submit" disabled={slipSaving}>
@@ -378,7 +322,9 @@ export function SlipsPage(props: Props) {
           <label>
             {t("selectCustomer")}
             <select
-              className="sarafiSelect"
+              className="sarafiSelect sarafiSelectCustomer"
+              dir="rtl"
+              lang="ps"
               value={editForm.customerId}
               onChange={(e) => setEditForm((p) => ({ ...p, customerId: e.target.value }))}
               required
@@ -386,7 +332,7 @@ export function SlipsPage(props: Props) {
               <option value="">—</option>
               {customers.map((customer) => (
                 <option key={customer.id} value={customer.id}>
-                  {customer.fullName}
+                  {customerOptionLabels.get(customer.id) ?? customer.fullName}
                 </option>
               ))}
             </select>
@@ -417,10 +363,19 @@ export function SlipsPage(props: Props) {
             />
           </label>
           <label>
-            {t("receiverName")}
+            {t("accountName")}
             <input
               value={editForm.receiverName}
               onChange={(e) => setEditForm((p) => ({ ...p, receiverName: e.target.value }))}
+              required
+            />
+          </label>
+          <label>
+            {t("slipPaidToName")}
+            <input
+              value={editForm.paidToName}
+              onChange={(e) => setEditForm((p) => ({ ...p, paidToName: e.target.value }))}
+              required
             />
           </label>
           <label>
@@ -451,7 +406,7 @@ export function SlipsPage(props: Props) {
           </div>
         </form>
       </FormModal>
-      <section className="card listCard customersListCard">
+      <section className="card listCard customersListCard slipsReportCard">
         <div className="reportFilterHeader">
           <div className="reportFilterTitleWrap">
             <div className="heroTitle">{t("slipsReport")}</div>
@@ -479,13 +434,16 @@ export function SlipsPage(props: Props) {
             <label>
               <span className="filterLabelText">{t("selectCustomer")}</span>
               <select
+                className="sarafiSelect sarafiSelectCustomer"
+                dir="rtl"
+                lang="ps"
                 value={slipFilters.customerId}
                 onChange={(e) => setSlipFilters((p) => ({ ...p, customerId: e.target.value }))}
               >
                 <option value="">{t("all")}</option>
                 {customers.map((customer) => (
                   <option key={customer.id} value={customer.id}>
-                    {customer.fullName}
+                    {customerOptionLabels.get(customer.id) ?? customer.fullName}
                   </option>
                 ))}
               </select>
@@ -548,12 +506,14 @@ export function SlipsPage(props: Props) {
         {slips.length === 0 ? (
           <div className="emptyText">{t("noSlips")}</div>
         ) : (
-          <div className="customerTableWrap">
+          <div className="customerTableWrap slipsReportTableWrap">
             <table className="customerTable">
               <thead>
                 <tr>
                   <th>{t("slipCode")}</th>
                   <th>{t("customers")}</th>
+                  <th>{t("accountName")}</th>
+                  <th>{t("slipPaidToName")}</th>
                   <th>{t("currency")}</th>
                   <th>{t("amount")}</th>
                   <th>{t("status")}</th>
@@ -566,12 +526,17 @@ export function SlipsPage(props: Props) {
                   <tr key={slip.id}>
                     <td className="customerName">{slip.slipCode}</td>
                     <td>{slip.customer?.fullName || "-"}</td>
+                    <td>{slip.receiverName?.trim() || "-"}</td>
+                    <td>{slip.paidToName?.trim() || "-"}</td>
                     <td>{slip.currencyCode}</td>
                     <td>{Number(slip.amount).toLocaleString("fa-AF")}</td>
                     <td>{t(slip.status)}</td>
-                    <td>{new Date(slip.createdAt).toLocaleDateString("fa-AF")}</td>
+                    <td>{formatGregorianDate(slip.createdAt)}</td>
                     <td>
                       <div className="customerActions slipRowActions">
+                        <button className="navItem" type="button" onClick={() => setRawDetail({ title: t("recordDetails"), record: slip })}>
+                          {t("view")}
+                        </button>
                         {slip.status === "issued" ? (
                           <>
                             <button className="navItem" type="button" onClick={() => openEditModal(slip)}>
@@ -609,6 +574,14 @@ export function SlipsPage(props: Props) {
           t={t}
         />
       </section>
+      <RawDetailModal
+        isOpen={rawDetail !== null}
+        onClose={() => setRawDetail(null)}
+        title={rawDetail?.title ?? ""}
+        record={rawDetail?.record}
+        closeLabel={t("cancel")}
+        t={t}
+      />
     </section>
   );
 }

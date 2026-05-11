@@ -1,7 +1,10 @@
 import type { FormEvent } from "react";
 import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { FormModal } from "../components/FormModal";
 import { PaginationControls } from "../components/PaginationControls";
+import { RawDetailModal } from "../components/RawDetailModal";
+import { formatGregorianDate } from "../lib/formatDate";
 
 type Customer = {
   id: string;
@@ -46,6 +49,7 @@ export function CustomersPage(props: Props) {
   const [editingCustomerId, setEditingCustomerId] = useState<string | null>(null);
   const [modalForm, setModalForm] = useState({ fullName: "", phone: "", idNumber: "", notes: "" });
   const [customersPage, setCustomersPage] = useState(1);
+  const [rawDetail, setRawDetail] = useState<{ title: string; record: unknown } | null>(null);
   const pageSize = 10;
   const pagedCustomers = useMemo(
     () => customers.slice((customersPage - 1) * pageSize, customersPage * pageSize),
@@ -141,12 +145,19 @@ export function CustomersPage(props: Props) {
                 <tbody>
                 {pagedCustomers.map((customer) => (
                     <tr key={customer.id}>
-                      <td className="customerName">{customer.fullName}</td>
+                      <td className="customerName">
+                        <Link className="customerProfileLink" to={`/customers/${customer.id}`}>
+                          {customer.fullName}
+                        </Link>
+                      </td>
                       <td>{customer.phone || "-"}</td>
                       <td>{customer.idNumber || "-"}</td>
-                      <td>{new Date(customer.createdAt).toLocaleDateString("fa-AF")}</td>
+                      <td>{formatGregorianDate(customer.createdAt)}</td>
                       <td>
                         <div className="customerActions">
+                          <button className="navItem" type="button" onClick={() => setRawDetail({ title: t("recordDetails"), record: customer })}>
+                            {t("view")}
+                          </button>
                           <button className="navItem" type="button" onClick={() => openEditModal(customer)}>
                             {t("edit")}
                           </button>
@@ -178,6 +189,9 @@ export function CustomersPage(props: Props) {
             <label>
               {t("fullName")}
               <input
+                dir="auto"
+                lang="ps"
+                autoComplete="name"
                 value={modalForm.fullName}
                 onChange={(e) => setModalForm((p) => ({ ...p, fullName: e.target.value }))}
                 required
@@ -215,6 +229,14 @@ export function CustomersPage(props: Props) {
             </div>
           </form>
         </FormModal>
+        <RawDetailModal
+          isOpen={rawDetail !== null}
+          onClose={() => setRawDetail(null)}
+          title={rawDetail?.title ?? ""}
+          record={rawDetail?.record}
+          closeLabel={t("cancel")}
+          t={t}
+        />
       </div>
     </section>
   );

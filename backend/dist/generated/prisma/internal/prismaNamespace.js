@@ -48,7 +48,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.defineExtension = exports.NullsOrder = exports.SortOrder = exports.ExchangeTransactionScalarFieldEnum = exports.PartnerTransactionScalarFieldEnum = exports.PartnerAccountScalarFieldEnum = exports.PartnerScalarFieldEnum = exports.SlipScalarFieldEnum = exports.DepositTransactionScalarFieldEnum = exports.CustomerAccountScalarFieldEnum = exports.CustomerScalarFieldEnum = exports.CurrencyScalarFieldEnum = exports.UserScalarFieldEnum = exports.TransactionIsolationLevel = exports.ModelName = exports.AnyNull = exports.JsonNull = exports.DbNull = exports.NullTypes = exports.prismaVersion = exports.getExtensionContext = exports.Decimal = exports.Sql = exports.raw = exports.join = exports.empty = exports.sql = exports.PrismaClientValidationError = exports.PrismaClientInitializationError = exports.PrismaClientRustPanicError = exports.PrismaClientUnknownRequestError = exports.PrismaClientKnownRequestError = void 0;
+exports.defineExtension = exports.NullsOrder = exports.SortOrder = exports.PartnerTransactionScalarFieldEnum = exports.PartnerAccountScalarFieldEnum = exports.PartnerScalarFieldEnum = exports.SlipScalarFieldEnum = exports.DepositTransactionScalarFieldEnum = exports.CustomerAccountScalarFieldEnum = exports.ExchangeTransactionScalarFieldEnum = exports.CustomerScalarFieldEnum = exports.CurrencyScalarFieldEnum = exports.UserScalarFieldEnum = exports.TransactionIsolationLevel = exports.ModelName = exports.AnyNull = exports.JsonNull = exports.DbNull = exports.NullTypes = exports.prismaVersion = exports.getExtensionContext = exports.Decimal = exports.Sql = exports.raw = exports.join = exports.empty = exports.sql = exports.PrismaClientValidationError = exports.PrismaClientInitializationError = exports.PrismaClientRustPanicError = exports.PrismaClientUnknownRequestError = exports.PrismaClientKnownRequestError = void 0;
 const runtime = __importStar(require("@prisma/client/runtime/client"));
 /**
  * Prisma Errors
@@ -106,13 +106,13 @@ exports.ModelName = {
     User: 'User',
     Currency: 'Currency',
     Customer: 'Customer',
+    ExchangeTransaction: 'ExchangeTransaction',
     CustomerAccount: 'CustomerAccount',
     DepositTransaction: 'DepositTransaction',
     Slip: 'Slip',
     Partner: 'Partner',
     PartnerAccount: 'PartnerAccount',
-    PartnerTransaction: 'PartnerTransaction',
-    ExchangeTransaction: 'ExchangeTransaction'
+    PartnerTransaction: 'PartnerTransaction'
 };
 /**
  * Enums
@@ -143,6 +143,25 @@ exports.CustomerScalarFieldEnum = {
     createdAt: 'createdAt',
     updatedAt: 'updatedAt'
 };
+exports.ExchangeTransactionScalarFieldEnum = {
+    id: 'id',
+    referenceNo: 'referenceNo',
+    clientReference: 'clientReference',
+    customerId: 'customerId',
+    fromCurrencyCode: 'fromCurrencyCode',
+    toCurrencyCode: 'toCurrencyCode',
+    sourceAmount: 'sourceAmount',
+    rate: 'rate',
+    targetAmountGross: 'targetAmountGross',
+    feeAmount: 'feeAmount',
+    targetAmountNet: 'targetAmountNet',
+    status: 'status',
+    ledgerBatchId: 'ledgerBatchId',
+    notes: 'notes',
+    createdById: 'createdById',
+    createdAt: 'createdAt',
+    updatedAt: 'updatedAt'
+};
 exports.CustomerAccountScalarFieldEnum = {
     id: 'id',
     customerId: 'customerId',
@@ -166,6 +185,7 @@ exports.SlipScalarFieldEnum = {
     currencyCode: 'currencyCode',
     amount: 'amount',
     receiverName: 'receiverName',
+    paidToName: 'paidToName',
     note: 'note',
     status: 'status',
     paidAt: 'paidAt',
@@ -200,24 +220,6 @@ exports.PartnerTransactionScalarFieldEnum = {
     referenceNo: 'referenceNo',
     note: 'note',
     reconciliationStatus: 'reconciliationStatus',
-    createdAt: 'createdAt'
-};
-exports.ExchangeTransactionScalarFieldEnum = {
-    id: 'id',
-    referenceNo: 'referenceNo',
-    clientReference: 'clientReference',
-    customerId: 'customerId',
-    fromCurrencyCode: 'fromCurrencyCode',
-    toCurrencyCode: 'toCurrencyCode',
-    sourceAmount: 'sourceAmount',
-    rate: 'rate',
-    targetAmountGross: 'targetAmountGross',
-    feeAmount: 'feeAmount',
-    targetAmountNet: 'targetAmountNet',
-    status: 'status',
-    ledgerBatchId: 'ledgerBatchId',
-    notes: 'notes',
-    createdById: 'createdById',
     createdAt: 'createdAt'
 };
 exports.SortOrder = {

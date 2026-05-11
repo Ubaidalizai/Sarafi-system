@@ -4,6 +4,8 @@ import { useTranslation } from "react-i18next";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { DashboardPage } from "./pages/DashboardPage";
 import { CustomersPage } from "./pages/CustomersPage";
+import { CustomerDetailPage } from "./pages/CustomerDetailPage";
+import { PartnerDetailPage } from "./pages/PartnerDetailPage";
 import { DepositsPage } from "./pages/DepositsPage";
 import { SlipsPage } from "./pages/SlipsPage";
 import { PartnersPage } from "./pages/PartnersPage";
@@ -35,7 +37,17 @@ export default function AppClean() {
     "/reports": "reports",
     "/profile": "profile",
   };
-  const activePage = pageMap[location.pathname] ?? "dashboard";
+  const activePage: PageKey = (() => {
+    const p = location.pathname;
+    if (p.startsWith("/customers")) return "customers";
+    if (p.startsWith("/deposits")) return "deposits";
+    if (p.startsWith("/slips")) return "slips";
+    if (p.startsWith("/partners")) return "partners";
+    if (p.startsWith("/reports")) return "reports";
+    if (p.startsWith("/profile")) return "profile";
+    if (p.startsWith("/dashboard")) return "dashboard";
+    return pageMap[p] ?? "dashboard";
+  })();
 
   const [dashboard, setDashboard] = useState({ currencyCode: "AFN", incoming: 0, outgoing: 0, balance: 0, todayNet: 0, pendingSettlements: 0 });
   const [customers, setCustomers] = useState<
@@ -71,21 +83,43 @@ export default function AppClean() {
     currencyCode: "AFN",
     amount: "",
     receiverName: "",
-    receiverTazkira: "",
-    receiverPhone: "",
+    paidToName: "",
     note: "",
-    /** false = not paid yet (issued); true = deduct balance now (paid) */
-    markPaid: false,
+    /** always paid now at issue time */
+    markPaid: true,
   });
   const [slipSaving, setSlipSaving] = useState(false);
   const [slipMutating, setSlipMutating] = useState(false);
   const [slipMessage, setSlipMessage] = useState("");
-  const [slipLookup, setSlipLookup] = useState<{ slipCode: string; customerId: string; currencyCode: string; amount: string; status: "issued" | "paid" | "cancelled" | "expired"; customer?: { fullName: string; phone?: string | null } } | null>(null);
+  const [slipLookup, setSlipLookup] = useState<{
+    slipCode: string;
+    customerId: string;
+    currencyCode: string;
+    amount: string;
+    status: "issued" | "paid" | "cancelled" | "expired";
+    receiverName?: string | null;
+    paidToName?: string | null;
+    customer?: { fullName: string; phone?: string | null };
+  } | null>(null);
   const [slipsLoading, setSlipsLoading] = useState(false);
-  const [slips, setSlips] = useState<Array<{ id: string; slipCode: string; customerId: string; currencyCode: string; amount: string; status: "issued" | "paid" | "cancelled" | "expired"; createdAt: string; customer?: { fullName: string; phone?: string | null } }>>([]);
+  const [slips, setSlips] = useState<
+    Array<{
+      id: string;
+      slipCode: string;
+      customerId: string;
+      currencyCode: string;
+      amount: string;
+      status: "issued" | "paid" | "cancelled" | "expired";
+      createdAt: string;
+      receiverName?: string | null;
+      paidToName?: string | null;
+      customer?: { fullName: string; phone?: string | null };
+    }>
+  >([]);
   const [slipFilters, setSlipFilters] = useState({ customerId: "", status: "", currencyCode: "", from: "", to: "" });
   const slipFiltersRef = useRef(slipFilters);
   slipFiltersRef.current = slipFilters;
+  const [slipCustomerAccounts, setSlipCustomerAccounts] = useState<Array<{ id: string; currencyCode: string; balance: string }>>([]);
   const [partners, setPartners] = useState<Array<{ id: string; name: string; country?: string | null; city?: string | null; contact?: string | null; notes?: string | null }>>([]);
   const [partnerForm, setPartnerForm] = useState({ name: "", country: "", city: "", contact: "", notes: "" });
   const [partnerSaving, setPartnerSaving] = useState(false);
@@ -111,13 +145,14 @@ export default function AppClean() {
       .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 1776))
       .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 1632))
       .replace(/٬/g, "")
+      .replace(/,/g, "")
       .replace(/،/g, ".")
       .trim();
     const amount = Number(normalized);
     return Number.isFinite(amount) ? amount : NaN;
   };
 
-  const apiFetch = async (url: string, init?: RequestInit) => {
+  const apiFetch = useCallback(async (url: string, init?: RequestInit) => {
     const response = await fetch(url, { ...init, headers: { ...(init?.headers || {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) } });
     if (response.status === 401 && token) {
       localStorage.removeItem("auth_token");
@@ -126,14 +161,33 @@ export default function AppClean() {
       setCurrentUser(null);
     }
     return response;
-  };
+  }, [token]);
 
   const loadCustomers = async () => {
     setLoading(true);
     try {
       const response = await apiFetch("http://localhost:4000/customers");
       const data = await response.json();
-      setCustomers(data.customers ?? []);
+      const list = data.customers ?? [];
+      setCustomers(list);
+      const ids = new Set(list.map((c: { id: string }) => c.id));
+      setDepositForm((p) => {
+        if (!p.customerId || ids.has(p.customerId)) return p;
+        localStorage.removeItem("last_deposit_customer_id");
+        return { ...p, customerId: "" };
+      });
+      setDepositHistoryFilters((p) => {
+        if (!p.customerId || ids.has(p.customerId)) return p;
+        return { ...p, customerId: "" };
+      });
+      setSlipForm((p) => {
+        if (!p.customerId || ids.has(p.customerId)) return p;
+        return { ...p, customerId: "" };
+      });
+      setSlipFilters((p) => {
+        if (!p.customerId || ids.has(p.customerId)) return p;
+        return { ...p, customerId: "" };
+      });
     } finally {
       setLoading(false);
     }
@@ -217,15 +271,32 @@ export default function AppClean() {
             settlementMode: "cash_in",
           }),
         });
-        const d = (await r.json()) as { error?: string };
+        const d = (await r.json()) as { error?: string | Record<string, unknown> };
         if (!r.ok) {
-          setDepositMessage(
-            d.error === "SAME_CURRENCY_NOT_ALLOWED"
+          const code = typeof d.error === "string" ? d.error : "";
+          const msg =
+            code === "SAME_CURRENCY_NOT_ALLOWED"
               ? t("exchangeSameCurrency")
-              : d.error === "CURRENCY_PRECISION_MISMATCH"
+              : code === "CURRENCY_PRECISION_MISMATCH"
                 ? t("exchangePrecisionError")
-                : t("exchangeSaveFailed")
-          );
+                : code === "INSUFFICIENT_SOURCE_BALANCE"
+                  ? t("exchangeInsufficientSourceBalance")
+                  : code === "INVALID_NET_AMOUNT"
+                    ? t("exchangeInvalidNetAmount")
+                    : code === "CUSTOMER_NOT_FOUND"
+                      ? t("exchangeCustomerNotFound")
+                      : code === "INVALID_CURRENCY"
+                        ? t("exchangeInvalidCurrency")
+                        : code === "DUPLICATE_CLIENT_REFERENCE"
+                          ? t("exchangeDuplicateReference")
+                          : code === "EXCHANGE_POST_FAILED"
+                            ? t("exchangeServerError")
+                            : code === "SESSION_STALE_RELOGIN"
+                              ? t("exchangeSessionStale")
+                              : d.error && typeof d.error !== "string"
+                              ? t("exchangeValidationFailed")
+                              : t("exchangeSaveFailed");
+          setDepositMessage(msg);
           return;
         }
       } else {
@@ -312,19 +383,12 @@ export default function AppClean() {
   const onIssueSlip = async (e: FormEvent): Promise<boolean> => {
     e.preventDefault();
     const amount = parseLocalizedAmount(slipForm.amount);
-    if (!slipForm.customerId || !amount || amount <= 0 || !slipForm.receiverName.trim() || !slipForm.receiverTazkira.trim()) {
+    if (!slipForm.customerId || !amount || amount <= 0 || !slipForm.receiverName.trim() || !slipForm.paidToName.trim()) {
       return false;
     }
     setSlipSaving(true);
     setSlipMessage("");
     try {
-      const extraInfo = [
-        `ReceiverTazkira: ${slipForm.receiverTazkira.trim()}`,
-        slipForm.receiverPhone.trim() ? `ReceiverPhone: ${slipForm.receiverPhone.trim()}` : "",
-        slipForm.note.trim() ? `Note: ${slipForm.note.trim()}` : "",
-      ]
-        .filter(Boolean)
-        .join(" | ");
       const r = await apiFetch("http://localhost:4000/slips", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -333,14 +397,19 @@ export default function AppClean() {
           currencyCode: slipForm.currencyCode,
           amount,
           receiverName: slipForm.receiverName,
-          note: extraInfo || undefined,
-          markPaid: slipForm.markPaid,
+          paidToName: slipForm.paidToName.trim(),
+          note: slipForm.note.trim() || undefined,
+          markPaid: true,
         }),
       });
       const d = (await r.json()) as { slip?: NonNullable<typeof slipLookup>; error?: string };
       if (!r.ok) {
         setSlipMessage(
-          d.error === "INSUFFICIENT_BALANCE" ? t("insufficientBalanceSlip") : d.error || t("slipCreateFailed")
+          d.error === "INSUFFICIENT_BALANCE"
+            ? t("insufficientBalanceSlipCurrency")
+            : d.error === "NO_ACCOUNT_FOR_SLIP_CURRENCY"
+              ? t("noAccountSlipCurrency")
+              : d.error || t("slipCreateFailed")
         );
         return false;
       }
@@ -348,14 +417,24 @@ export default function AppClean() {
         ...p,
         amount: "",
         receiverName: "",
-        receiverTazkira: "",
-        receiverPhone: "",
+        paidToName: "",
         note: "",
-        markPaid: false,
+        markPaid: true,
       }));
       if (d.slip) setSlipLookup(d.slip);
       setSlipMessage(`${t("savedSuccessfully")} — ${d.slip?.slipCode ?? ""}`);
-      await Promise.all([loadSlips(), loadDashboard(), loadBalanceReports(), refreshSelectedCustomerAccounts()]);
+      await Promise.all([
+        loadSlips(),
+        loadDashboard(),
+        loadBalanceReports(),
+        refreshSelectedCustomerAccounts(),
+        (async () => {
+          if (!slipForm.customerId) return;
+          const r = await apiFetch(`http://localhost:4000/customers/${slipForm.customerId}/accounts`);
+          const data = (await r.json()) as { accounts?: typeof slipCustomerAccounts };
+          if (r.ok) setSlipCustomerAccounts(data.accounts ?? []);
+        })(),
+      ]);
       return true;
     } finally {
       setSlipSaving(false);
@@ -364,7 +443,14 @@ export default function AppClean() {
   const setSlipStatus = async (slipCode: string, status: "cancelled" | "expired") => { const r = await apiFetch(`http://localhost:4000/slips/${encodeURIComponent(slipCode)}/status`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) }); const d = await r.json(); if (!r.ok) return setSlipMessage(d.error || "Error"); if (slipLookup?.slipCode === slipCode) setSlipLookup(d.slip); await loadSlips(); };
   const onUpdateSlip = async (
     slipCode: string,
-    payload: { customerId: string; currencyCode: string; amount: number; receiverName: string; note: string }
+    payload: {
+      customerId: string;
+      currencyCode: string;
+      amount: number;
+      receiverName: string;
+      paidToName: string;
+      note: string;
+    }
   ): Promise<boolean> => {
     setSlipMutating(true);
     setSlipMessage("");
@@ -374,7 +460,8 @@ export default function AppClean() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...payload,
-          receiverName: payload.receiverName || undefined,
+          receiverName: payload.receiverName.trim(),
+          paidToName: payload.paidToName.trim(),
           note: payload.note || undefined,
         }),
       });
@@ -690,7 +777,31 @@ export default function AppClean() {
     }, 10000);
     return () => window.clearInterval(timerId);
   }, [token, location.pathname, dashboard.currencyCode]);
-  useEffect(() => { if (!token) return; if (location.pathname === "/" || !(location.pathname in pageMap)) navigate("/dashboard", { replace: true }); }, [token, location.pathname, navigate]);
+  useEffect(() => {
+    if (!token) return;
+    const p = location.pathname;
+    if (p === "/") return;
+    if (p in pageMap) return;
+    /** Customer detail: `/customers/:id` is not a static key in pageMap */
+    if (p.startsWith("/customers/") && p.length > "/customers/".length) return;
+    /** Partner detail: `/partners/:id` */
+    if (p.startsWith("/partners/") && p.length > "/partners/".length) return;
+    navigate("/dashboard", { replace: true });
+  }, [token, location.pathname, navigate]);
+  useEffect(() => {
+    if (!token) return;
+    const customerId = slipForm.customerId;
+    if (!customerId) {
+      setSlipCustomerAccounts([]);
+      return;
+    }
+    void (async () => {
+      const r = await apiFetch(`http://localhost:4000/customers/${customerId}/accounts`);
+      const data = (await r.json()) as { accounts?: typeof slipCustomerAccounts };
+      if (r.ok) setSlipCustomerAccounts(data.accounts ?? []);
+    })();
+  }, [token, slipForm.customerId]);
+
   useEffect(() => {
     if (!token) return;
     const customerId = depositForm.customerId;
@@ -795,6 +906,10 @@ export default function AppClean() {
                   />
                 }
               />
+              <Route
+                path="/customers/:customerId"
+                element={<CustomerDetailPage t={t} apiFetch={apiFetch} currencies={currencies} />}
+              />
               <Route path="/customers" element={<CustomersPage t={t} saving={saving} loading={loading} customers={customers} loadCustomers={loadCustomers} onCreateCustomer={onCreateCustomer} onUpdateCustomer={onUpdateCustomer} onDeleteCustomer={onDeleteCustomer} />} />
               <Route
                 path="/deposits"
@@ -826,6 +941,7 @@ export default function AppClean() {
                     t={t}
                     customers={customers}
                     currencies={currencies}
+                    slipCustomerAccounts={slipCustomerAccounts}
                     slipForm={slipForm}
                     setSlipForm={setSlipForm}
                     slipSaving={slipSaving}
@@ -843,6 +959,10 @@ export default function AppClean() {
                     onDeleteSlip={onDeleteSlip}
                   />
                 }
+              />
+              <Route
+                path="/partners/:partnerId"
+                element={<PartnerDetailPage t={t} apiFetch={apiFetch} currencies={currencies} />}
               />
               <Route path="/partners" element={<PartnersPage t={t} partners={partners} partnerForm={partnerForm} setPartnerForm={setPartnerForm} partnerSaving={partnerSaving} onCreatePartner={onCreatePartner} onUpdatePartner={onUpdatePartner} onDeletePartner={onDeletePartner} currencies={currencies} partnerTxForm={partnerTxForm} setPartnerTxForm={setPartnerTxForm} loadPartnerAccounts={loadPartnerAccounts} onCreatePartnerTx={onCreatePartnerTx} onUpdatePartnerTx={onUpdatePartnerTx} onDeletePartnerTx={onDeletePartnerTx} partnerTxSaving={partnerTxSaving} partnerMessage={partnerMessage} partnerAccounts={partnerAccounts} partnerTxs={partnerTxs} loadPartnerTxs={loadPartnerTxs} />} />
               <Route path="/reports" element={<ReportsPage t={t} loadBalanceReports={loadBalanceReports} loadSlips={loadSlips} slips={slips} customerBalanceReport={customerBalanceReport} partnerBalanceReport={partnerBalanceReport} />} />

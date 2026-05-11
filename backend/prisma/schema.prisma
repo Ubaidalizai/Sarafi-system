@@ -43,6 +43,8 @@ model User {
   role         UserRole @default(cashier)
   isActive     Boolean  @default(true)
 
+  exchanges ExchangeTransaction[] @relation("ExchangeCreatedBy")
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -66,9 +68,34 @@ model Customer {
   idNumber  String?
   notes     String?
 
-  accounts CustomerAccount[]
-  deposits DepositTransaction[]
-  slips Slip[]
+  accounts  CustomerAccount[]
+  deposits  DepositTransaction[]
+  slips     Slip[]
+  exchanges ExchangeTransaction[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ExchangeTransaction {
+  id                  String  @id @default(cuid())
+  referenceNo         String  @unique
+  clientReference     String? @unique
+  customerId          String
+  fromCurrencyCode    String
+  toCurrencyCode      String
+  sourceAmount        Decimal
+  rate                Decimal
+  targetAmountGross   Decimal
+  feeAmount           Decimal
+  targetAmountNet     Decimal
+  status              String  @default("posted")
+  ledgerBatchId       String
+  notes               String?
+  createdById         String
+
+  customer  Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  createdBy User     @relation("ExchangeCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -110,6 +137,8 @@ model Slip {
   currencyCode String
   amount Decimal
   receiverName String?
+  /** Person/counterparty to whom cash is paid (distinct from bank account label). */
+  paidToName String?
   note String?
   status SlipStatus @default(issued)
   paidAt DateTime?

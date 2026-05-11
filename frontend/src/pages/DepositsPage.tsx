@@ -2,6 +2,10 @@ import type { Dispatch, FormEvent, SetStateAction } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { FormModal } from "../components/FormModal";
 import { PaginationControls } from "../components/PaginationControls";
+import { RawDetailModal } from "../components/RawDetailModal";
+import { buildCustomerOptionLabels } from "../lib/customerSelectLabels";
+import { formatGregorianDate } from "../lib/formatDate";
+import { parseFxCashInNote, sourceAmountFromFxTarget } from "../lib/fxCashInDeposit";
 
 type DepositHistoryFilters = { customerId: string; currencyCode: string };
 
@@ -67,10 +71,17 @@ export function DepositsPage(props: Props) {
   const [editingDepositId, setEditingDepositId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState({ customerId: "", currencyCode: "AFN", amount: "", note: "" });
   const [historyPage, setHistoryPage] = useState(1);
+  const [rawDetail, setRawDetail] = useState<{ title: string; record: unknown } | null>(null);
   const pageSize = 10;
   const pagedDeposits = useMemo(
     () => deposits.slice((historyPage - 1) * pageSize, historyPage * pageSize),
     [deposits, historyPage]
+  );
+
+  const customerOptionLabels = useMemo(() => buildCustomerOptionLabels(customers), [customers]);
+  const currencyNameByCode = useMemo(
+    () => new Map(currencies.map((currency) => [currency.code.toUpperCase(), currency.name])),
+    [currencies]
   );
 
   useEffect(() => {
@@ -87,6 +98,7 @@ export function DepositsPage(props: Props) {
       .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 1776))
       .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 1632))
       .replace(/٬/g, "")
+      .replace(/,/g, "")
       .replace(/،/g, ".")
       .trim();
     const amount = Number(normalized);
@@ -122,6 +134,23 @@ export function DepositsPage(props: Props) {
     await onDeleteDeposit(item.id, item.customerId);
   };
 
+  const formatAmountWithCurrency = (amount: number, currencyCode: string) =>
+    `${amount.toLocaleString("fa-AF")} ${currencyCode}${currencyNameByCode.get(currencyCode.toUpperCase()) ? ` (${currencyNameByCode.get(currencyCode.toUpperCase())})` : ""}`;
+
+  const buildFxSummary = (item: Props["deposits"][number]) => {
+    const parsed = parseFxCashInNote(item.note);
+    if (!parsed) return "";
+    const targetNet = Number(item.amount);
+    if (!Number.isFinite(targetNet)) return "";
+
+    const sourceAmount = sourceAmountFromFxTarget(targetNet, parsed.rate, parsed.fee);
+    const sourceText = formatAmountWithCurrency(sourceAmount, parsed.fromCurrency);
+    const targetText = formatAmountWithCurrency(targetNet, parsed.toCurrency);
+    const feeText =
+      parsed.fee > 0 ? ` | fee ${parsed.fee.toLocaleString("fa-AF")} ${parsed.toCurrency}` : "";
+    return `FX: ${sourceText} -> ${targetText} @ ${parsed.rate.toLocaleString("fa-AF")}${feeText}`;
+  };
+
   return (
     <section className="customersPageRoot">
       <div className="card formCard customersPageHeaderCard">
@@ -143,7 +172,9 @@ export function DepositsPage(props: Props) {
           </label>
           <select
             id="deposit-balance-customer"
-            className="sarafiSelect"
+            className="sarafiSelect sarafiSelectCustomer"
+            dir="rtl"
+            lang="ps"
             value={depositForm.customerId}
             onChange={(e) => {
               const customerId = e.target.value;
@@ -154,7 +185,7 @@ export function DepositsPage(props: Props) {
             <option value="">—</option>
             {customers.map((customer) => (
               <option key={customer.id} value={customer.id}>
-                {customer.fullName}
+                {customerOptionLabels.get(customer.id) ?? customer.fullName}
               </option>
             ))}
           </select>
@@ -171,6 +202,7 @@ export function DepositsPage(props: Props) {
                 <tr>
                   <th>{t("currency")}</th>
                   <th>{t("balance")}</th>
+                  <th>{t("quickActions")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -178,6 +210,13 @@ export function DepositsPage(props: Props) {
                   <tr key={account.id}>
                     <td className="customerName">{account.currencyCode}</td>
                     <td>{Number(account.balance).toLocaleString("fa-AF")}</td>
+                    <td>
+                      <div className="customerActions">
+                        <button className="navItem" type="button" onClick={() => setRawDetail({ title: t("recordDetails"), record: account })}>
+                          {t("view")}
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -201,7 +240,9 @@ export function DepositsPage(props: Props) {
           <label>
             <span className="depositsFilterLabel">{t("filterByCustomer")}</span>
             <select
-              className="sarafiSelect"
+              className="sarafiSelect sarafiSelectCustomer"
+              dir="rtl"
+              lang="ps"
               value={depositHistoryFilters.customerId}
               onChange={(e) =>
                 setDepositHistoryFilters((p) => ({ ...p, customerId: e.target.value }))
@@ -211,7 +252,7 @@ export function DepositsPage(props: Props) {
               <option value="">{t("allCustomers")}</option>
               {customers.map((customer) => (
                 <option key={customer.id} value={customer.id}>
-                  {customer.fullName}
+                  {customerOptionLabels.get(customer.id) ?? customer.fullName}
                 </option>
               ))}
             </select>
@@ -257,14 +298,26 @@ export function DepositsPage(props: Props) {
                 </tr>
               </thead>
               <tbody>
-                {pagedDeposits.map((item) => (
+                {pagedDeposits.map((item) => {
+                  const fxSummary = buildFxSummary(item);
+                  return (
                   <tr key={item.id}>
                     <td className="customerName">{item.customer?.fullName || "-"}</td>
                     <td>{item.currencyCode}</td>
-                    <td>{Number(item.amount).toLocaleString("fa-AF")}</td>
-                    <td>{new Date(item.createdAt).toLocaleDateString("fa-AF")}</td>
+                    <td>
+                      <div>{Number(item.amount).toLocaleString("fa-AF")}</div>
+                      {fxSummary ? (
+                        <div className="reportFilterSubtitle" style={{ marginTop: 4 }}>
+                          {fxSummary}
+                        </div>
+                      ) : null}
+                    </td>
+                    <td>{formatGregorianDate(item.createdAt)}</td>
                     <td>
                       <div className="customerActions">
+                        <button className="navItem" type="button" onClick={() => setRawDetail({ title: t("recordDetails"), record: item })}>
+                          {t("view")}
+                        </button>
                         <button className="navItem" type="button" onClick={() => openEditModal(item)}>
                           {t("edit")}
                         </button>
@@ -274,7 +327,7 @@ export function DepositsPage(props: Props) {
                       </div>
                     </td>
                   </tr>
-                ))}
+                )})}
               </tbody>
             </table>
           </div>
@@ -292,7 +345,9 @@ export function DepositsPage(props: Props) {
           <label>
             {t("selectCustomer")}
             <select
-              className="sarafiSelect"
+              className="sarafiSelect sarafiSelectCustomer"
+              dir="rtl"
+              lang="ps"
               value={depositForm.customerId}
               onChange={(e) => {
                 const customerId = e.target.value;
@@ -304,7 +359,7 @@ export function DepositsPage(props: Props) {
               <option value="">—</option>
               {customers.map((customer) => (
                 <option key={customer.id} value={customer.id}>
-                  {customer.fullName}
+                  {customerOptionLabels.get(customer.id) ?? customer.fullName}
                 </option>
               ))}
             </select>
@@ -403,7 +458,9 @@ export function DepositsPage(props: Props) {
           <label>
             {t("selectCustomer")}
             <select
-              className="sarafiSelect"
+              className="sarafiSelect sarafiSelectCustomer"
+              dir="rtl"
+              lang="ps"
               value={editForm.customerId}
               onChange={(e) => setEditForm((p) => ({ ...p, customerId: e.target.value }))}
               required
@@ -411,7 +468,7 @@ export function DepositsPage(props: Props) {
               <option value="">—</option>
               {customers.map((customer) => (
                 <option key={customer.id} value={customer.id}>
-                  {customer.fullName}
+                  {customerOptionLabels.get(customer.id) ?? customer.fullName}
                 </option>
               ))}
             </select>
@@ -459,6 +516,15 @@ export function DepositsPage(props: Props) {
           </div>
         </form>
       </FormModal>
+      <RawDetailModal
+        isOpen={rawDetail !== null}
+        onClose={() => setRawDetail(null)}
+        title={rawDetail?.title ?? ""}
+        record={rawDetail?.record}
+        closeLabel={t("cancel")}
+        t={t}
+        currencyNames={Object.fromEntries(currencies.map((c) => [c.code.toUpperCase(), c.name]))}
+      />
     </section>
   );
 }

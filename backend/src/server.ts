@@ -158,6 +158,7 @@ const parseLocalizedNumber = (value: unknown) => {
     .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 1776))
     .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 1632))
     .replace(/٬/g, "")
+    .replace(/,/g, "")
     .replace(/،/g, ".")
     .trim();
   const n = Number(normalized);
@@ -177,7 +178,8 @@ const issueSlipSchema = z.object({
   customerId: z.string().min(1),
   currencyCode: z.string().min(2).max(10),
   amount: amountSchema,
-  receiverName: z.string().max(120).optional(),
+  receiverName: z.string().min(1).max(120),
+  paidToName: z.string().min(1).max(120),
   note: z.string().max(500).optional(),
   /** If true, deduct customer balance immediately and set slip status to paid */
   markPaid: z.boolean().optional(),
@@ -185,6 +187,7 @@ const issueSlipSchema = z.object({
 
 const payoutSlipSchema = z.object({
   receiverName: z.string().max(120).optional(),
+  paidToName: z.string().max(120).optional(),
   note: z.string().max(500).optional(),
 });
 
@@ -196,7 +199,8 @@ const updateSlipSchema = z.object({
   customerId: z.string().min(1),
   currencyCode: z.string().min(2).max(10),
   amount: amountSchema,
-  receiverName: z.string().max(120).optional(),
+  receiverName: z.string().min(1).max(120),
+  paidToName: z.string().min(1).max(120),
   note: z.string().max(500).optional(),
 });
 
@@ -221,15 +225,21 @@ const partnerTxSchema = z.object({
 
 const defaultCurrencies = [
   { code: "AFN", name: "Afghani" },
+  { code: "AED", name: "UAE Darham" },
   { code: "USD", name: "US Dollar" },
   { code: "IRR", name: "Iranian Rial" },
   { code: "PKR", name: "Pakistani Rupee" },
   { code: "TOMAN", name: "Toman" },
 ] as const;
 
-const newSlipCode = () => {
-  const random = Math.floor(Math.random() * 900000 + 100000);
-  return `SLP-${Date.now().toString().slice(-6)}-${random}`;
+/** Next slip code: "0", "1", "2", … (numeric string; ignores legacy non-numeric slipCode rows). */
+const nextNumericSlipCode = async (tx: { $queryRaw: typeof prisma.$queryRaw }) => {
+  const rows = await tx.$queryRaw<Array<{ n: bigint | number | null }>>`
+    SELECT COALESCE(MAX(CAST(slipCode AS INTEGER)), -1) + 1 AS n
+    FROM Slip
+    WHERE slipCode GLOB '[0-9]*'
+  `;
+  return String(Number(rows[0]?.n ?? 0));
 };
 
 const firstParam = (value: unknown): string | undefined => {
@@ -248,6 +258,7 @@ const startOfToday = () => {
 
 const currencyPrecision: Record<string, number> = {
   AFN: 2,
+  AED: 2,
   USD: 2,
   IRR: 0,
   PKR: 2,
@@ -341,6 +352,9 @@ app.post("/api/v1/exchanges", requireAuth, requireRole(["admin", "cashier"]), as
   const customer = await prisma.customer.findUnique({ where: { id: customerId } });
   if (!customer) return res.status(404).json({ ok: false, error: "CUSTOMER_NOT_FOUND" });
 
+  const actor = await prisma.user.findUnique({ where: { id: userId }, select: { id: true } });
+  if (!actor) return res.status(401).json({ ok: false, error: "SESSION_STALE_RELOGIN" });
+
   const [fromCurrencyExists, toCurrencyExists] = await Promise.all([
     prisma.currency.findUnique({ where: { code: fromCurrency } }),
     prisma.currency.findUnique({ where: { code: toCurrency } }),
@@ -403,6 +417,11 @@ app.post("/api/v1/exchanges", requireAuth, requireRole(["admin", "cashier"]), as
     if (posted.error === "INSUFFICIENT_SOURCE_BALANCE") {
       return res.status(409).json({ ok: false, error: posted.error });
     }
+    if (/Foreign key constraint/i.test(posted.error)) {
+      console.error("[EXCHANGE_POST_FAILED]", posted.error);
+      return res.status(401).json({ ok: false, error: "SESSION_STALE_RELOGIN" });
+    }
+    console.error("[EXCHANGE_POST_FAILED]", posted.error);
     return res.status(500).json({ ok: false, error: "EXCHANGE_POST_FAILED" });
   }
 
@@ -454,13 +473,35 @@ app.get("/customers", requireAuth, async (_req, res) => {
   res.json({ ok: true, customers });
 });
 
+app.get("/customers/:customerId", requireAuth, async (req, res) => {
+  const customerId = firstParam(req.params.customerId);
+  if (!customerId) return res.status(400).json({ ok: false, error: "INVALID_CUSTOMER_ID" });
+  const customer = await prisma.customer.findUnique({ where: { id: customerId } });
+  if (!customer) return res.status(404).json({ ok: false, error: "CUSTOMER_NOT_FOUND" });
+  res.json({ ok: true, customer });
+});
+
 app.post("/customers", requireAuth, async (req, res) => {
   const parsed = customerSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ ok: false, error: parsed.error.flatten() });
 
-  const customer = await prisma.customer.create({
-    data: parsed.data,
+  const normalizedName = parsed.data.fullName.normalize("NFC").trim();
+
+  const customer = await prisma.$transaction(async (tx) => {
+    await tx.currency.upsert({
+      where: { code: "AFN" },
+      create: { code: "AFN", name: "Afghani", isActive: true },
+      update: { isActive: true },
+    });
+    const created = await tx.customer.create({
+      data: { ...parsed.data, fullName: normalizedName },
+    });
+    await tx.customerAccount.create({
+      data: { customerId: created.id, currencyCode: "AFN", balance: 0 },
+    });
+    return created;
   });
+
   res.status(201).json({ ok: true, customer });
 });
 
@@ -474,9 +515,11 @@ app.put("/customers/:customerId", requireAuth, async (req, res) => {
   const exists = await prisma.customer.findUnique({ where: { id: customerId } });
   if (!exists) return res.status(404).json({ ok: false, error: "CUSTOMER_NOT_FOUND" });
 
+  const normalizedName = parsed.data.fullName.normalize("NFC").trim();
+
   const customer = await prisma.customer.update({
     where: { id: customerId },
-    data: parsed.data,
+    data: { ...parsed.data, fullName: normalizedName },
   });
   res.json({ ok: true, customer });
 });
@@ -485,12 +528,16 @@ app.delete("/customers/:customerId", requireAuth, requireRole(["admin", "cashier
   const customerId = firstParam(req.params.customerId);
   if (!customerId) return res.status(400).json({ ok: false, error: "INVALID_CUSTOMER_ID" });
 
-  const related = await Promise.all([
-    prisma.customerAccount.count({ where: { customerId } }),
+  const [depositCount, slipCount, accounts] = await Promise.all([
     prisma.depositTransaction.count({ where: { customerId } }),
     prisma.slip.count({ where: { customerId } }),
+    prisma.customerAccount.findMany({
+      where: { customerId },
+      select: { balance: true },
+    }),
   ]);
-  if (related.some((count) => count > 0)) {
+  const hasNonZeroBalance = accounts.some((a) => Number(a.balance) !== 0);
+  if (depositCount > 0 || slipCount > 0 || hasNonZeroBalance) {
     return res.status(409).json({ ok: false, error: "CUSTOMER_HAS_TRANSACTIONS" });
   }
 
@@ -714,7 +761,7 @@ app.post("/slips", requireAuth, requireRole(["admin", "cashier"]), async (req, r
   const parsed = issueSlipSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ ok: false, error: parsed.error.flatten() });
 
-  const { customerId, currencyCode, amount, receiverName, note, markPaid } = parsed.data;
+  const { customerId, currencyCode, amount, receiverName, paidToName, note, markPaid } = parsed.data;
   const normalizedCurrency = currencyCode.toUpperCase();
 
   const customer = await prisma.customer.findUnique({ where: { id: customerId } });
@@ -730,7 +777,10 @@ app.post("/slips", requireAuth, requireRole(["admin", "cashier"]), async (req, r
           customerId_currencyCode: { customerId, currencyCode: normalizedCurrency },
         },
       });
-      if (!account || Number(account.balance) < Number(amount)) {
+      if (!account) {
+        throw new Error("NO_ACCOUNT_FOR_SLIP_CURRENCY");
+      }
+      if (Number(account.balance) < Number(amount)) {
         throw new Error("INSUFFICIENT_BALANCE");
       }
       await tx.customerAccount.update({
@@ -739,13 +789,15 @@ app.post("/slips", requireAuth, requireRole(["admin", "cashier"]), async (req, r
         },
         data: { balance: { decrement: amount } },
       });
+      const slipCode = await nextNumericSlipCode(tx);
       return tx.slip.create({
         data: {
-          slipCode: newSlipCode(),
+          slipCode,
           customerId,
           currencyCode: normalizedCurrency,
           amount,
-          receiverName,
+          receiverName: receiverName.trim(),
+          paidToName: paidToName.trim(),
           note,
           status: "paid",
           paidAt: new Date(),
@@ -757,22 +809,29 @@ app.post("/slips", requireAuth, requireRole(["admin", "cashier"]), async (req, r
       if (paid.error === "INSUFFICIENT_BALANCE") {
         return res.status(409).json({ ok: false, error: "INSUFFICIENT_BALANCE" });
       }
+      if (paid.error === "NO_ACCOUNT_FOR_SLIP_CURRENCY") {
+        return res.status(409).json({ ok: false, error: paid.error });
+      }
       return res.status(500).json({ ok: false, error: "SLIP_CREATE_FAILED" });
     }
 
     return res.status(201).json({ ok: true, slip: paid });
   }
 
-  const slip = await prisma.slip.create({
-    data: {
-      slipCode: newSlipCode(),
-      customerId,
-      currencyCode: normalizedCurrency,
-      amount,
-      receiverName,
-      note,
-      status: "issued",
-    },
+  const slip = await prisma.$transaction(async (tx) => {
+    const slipCode = await nextNumericSlipCode(tx);
+    return tx.slip.create({
+      data: {
+        slipCode,
+        customerId,
+        currencyCode: normalizedCurrency,
+        amount,
+        receiverName: receiverName.trim(),
+        paidToName: paidToName.trim(),
+        note,
+        status: "issued",
+      },
+    });
   });
 
   res.status(201).json({ ok: true, slip });
@@ -845,7 +904,10 @@ app.post("/slips/:slipCode/payout", requireAuth, requireRole(["admin", "cashier"
       },
     });
 
-    if (!account || Number(account.balance) < Number(slip.amount)) {
+    if (!account) {
+      throw new Error("NO_ACCOUNT_FOR_SLIP_CURRENCY");
+    }
+    if (Number(account.balance) < Number(slip.amount)) {
       throw new Error("INSUFFICIENT_BALANCE");
     }
 
@@ -865,6 +927,7 @@ app.post("/slips/:slipCode/payout", requireAuth, requireRole(["admin", "cashier"
         status: "paid",
         paidAt: new Date(),
         receiverName: parsed.data.receiverName ?? slip.receiverName,
+        paidToName: parsed.data.paidToName !== undefined ? parsed.data.paidToName?.trim() || null : slip.paidToName,
         note: parsed.data.note ?? slip.note,
       },
     });
@@ -878,6 +941,9 @@ app.post("/slips/:slipCode/payout", requireAuth, requireRole(["admin", "cashier"
     if (result.error === "SLIP_NOT_FOUND") return res.status(404).json({ ok: false, error: result.error });
     if (result.error === "SLIP_NOT_PAYABLE") return res.status(409).json({ ok: false, error: result.error });
     if (result.error === "INSUFFICIENT_BALANCE") return res.status(409).json({ ok: false, error: result.error });
+    if (result.error === "NO_ACCOUNT_FOR_SLIP_CURRENCY") {
+      return res.status(409).json({ ok: false, error: result.error });
+    }
     return res.status(500).json({ ok: false, error: "PAYOUT_FAILED" });
   }
 
@@ -915,7 +981,7 @@ app.put("/slips/:slipCode", requireAuth, requireRole(["admin", "cashier"]), asyn
     return res.status(409).json({ ok: false, error: "SLIP_NOT_EDITABLE" });
   }
 
-  const { customerId, currencyCode, amount, receiverName, note } = parsed.data;
+  const { customerId, currencyCode, amount, receiverName, paidToName, note } = parsed.data;
   const normalizedCurrency = currencyCode.toUpperCase();
 
   const customer = await prisma.customer.findUnique({ where: { id: customerId } });
@@ -929,7 +995,8 @@ app.put("/slips/:slipCode", requireAuth, requireRole(["admin", "cashier"]), asyn
       customerId,
       currencyCode: normalizedCurrency,
       amount,
-      receiverName: receiverName?.trim() || null,
+      receiverName: receiverName.trim(),
+      paidToName: paidToName.trim(),
       note: note?.trim() || null,
     },
     include: {
@@ -983,6 +1050,14 @@ app.get("/partners", requireAuth, async (_req, res) => {
     take: 200,
   });
   res.json({ ok: true, partners });
+});
+
+app.get("/partners/:partnerId", requireAuth, async (req, res) => {
+  const partnerId = firstParam(req.params.partnerId);
+  if (!partnerId) return res.status(400).json({ ok: false, error: "INVALID_PARTNER_ID" });
+  const partner = await prisma.partner.findUnique({ where: { id: partnerId } });
+  if (!partner) return res.status(404).json({ ok: false, error: "PARTNER_NOT_FOUND" });
+  res.json({ ok: true, partner });
 });
 
 app.post("/partners", requireAuth, requireRole(["admin", "accountant"]), async (req, res) => {

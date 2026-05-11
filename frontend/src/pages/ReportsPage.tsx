@@ -1,5 +1,7 @@
 import { useMemo, useState } from "react";
 import { PaginationControls } from "../components/PaginationControls";
+import { RawDetailModal } from "../components/RawDetailModal";
+import { formatGregorianDate } from "../lib/formatDate";
 
 type Props = {
   t: (key: string) => string;
@@ -33,6 +35,7 @@ export function ReportsPage(props: Props) {
   const [customerPage, setCustomerPage] = useState(1);
   const [slipsPage, setSlipsPage] = useState(1);
   const [partnerPage, setPartnerPage] = useState(1);
+  const [rawDetail, setRawDetail] = useState<{ title: string; record: unknown } | null>(null);
   const pageSize = 10;
   const pagedCustomerBalances = useMemo(
     () => customerBalanceReport.slice((customerPage - 1) * pageSize, customerPage * pageSize),
@@ -151,6 +154,7 @@ export function ReportsPage(props: Props) {
                   <th>{t("customers")}</th>
                   <th>{t("currency")}</th>
                   <th>{t("balance")}</th>
+                  <th>{t("quickActions")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -159,6 +163,13 @@ export function ReportsPage(props: Props) {
                     <td className="customerName">{row.customer?.fullName || "-"}</td>
                     <td>{row.currencyCode}</td>
                     <td>{Number(row.balance).toLocaleString("fa-AF")}</td>
+                    <td>
+                      <div className="customerActions">
+                        <button className="navItem" type="button" onClick={() => setRawDetail({ title: t("recordDetails"), record: row })}>
+                          {t("view")}
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -194,6 +205,7 @@ export function ReportsPage(props: Props) {
                   <th>{t("amount")}</th>
                   <th>{t("status")}</th>
                   <th>{t("createdAt")}</th>
+                  <th>{t("quickActions")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -204,7 +216,14 @@ export function ReportsPage(props: Props) {
                     <td>{slip.currencyCode}</td>
                     <td>{Number(slip.amount).toLocaleString("fa-AF")}</td>
                     <td>{t(slip.status)}</td>
-                    <td>{new Date(slip.createdAt).toLocaleDateString("fa-AF")}</td>
+                    <td>{formatGregorianDate(slip.createdAt)}</td>
+                    <td>
+                      <div className="customerActions">
+                        <button className="navItem" type="button" onClick={() => setRawDetail({ title: t("recordDetails"), record: slip })}>
+                          {t("view")}
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -237,6 +256,7 @@ export function ReportsPage(props: Props) {
                   <th>{t("partners")}</th>
                   <th>{t("currency")}</th>
                   <th>{t("balance")}</th>
+                  <th>{t("quickActions")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -245,6 +265,13 @@ export function ReportsPage(props: Props) {
                     <td className="customerName">{row.partner?.name || "-"}</td>
                     <td>{row.currencyCode}</td>
                     <td>{Number(row.balance).toLocaleString("fa-AF")}</td>
+                    <td>
+                      <div className="customerActions">
+                        <button className="navItem" type="button" onClick={() => setRawDetail({ title: t("recordDetails"), record: row })}>
+                          {t("view")}
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -259,6 +286,14 @@ export function ReportsPage(props: Props) {
           t={t}
         />
       </div>
+      <RawDetailModal
+        isOpen={rawDetail !== null}
+        onClose={() => setRawDetail(null)}
+        title={rawDetail?.title ?? ""}
+        record={rawDetail?.record}
+        closeLabel={t("cancel")}
+        t={t}
+      />
     </section>
   );
 }

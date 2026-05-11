@@ -1,7 +1,10 @@
 import type { Dispatch, FormEvent, SetStateAction } from "react";
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { FormModal } from "../components/FormModal";
 import { PaginationControls } from "../components/PaginationControls";
+import { RawDetailModal } from "../components/RawDetailModal";
+import { formatGregorianDate } from "../lib/formatDate";
 
 type Props = {
   t: (key: string) => string;
@@ -17,7 +20,7 @@ type Props = {
     payload: { name: string; country: string; city: string; contact: string; notes: string }
   ) => Promise<boolean>;
   onDeletePartner: (partnerId: string) => Promise<boolean>;
-  currencies: Array<{ code: string }>;
+  currencies: Array<{ code: string; name?: string }>;
   partnerTxForm: {
     partnerId: string;
     currencyCode: string;
@@ -120,6 +123,7 @@ export function PartnersPage(props: Props) {
     reconciliationStatus: "",
   });
   const pageSize = 10;
+  const [rawDetail, setRawDetail] = useState<{ title: string; record: unknown } | null>(null);
   const filteredPartners = useMemo(() => {
     const name = partnersFilters.name.trim().toLowerCase();
     return partners.filter((partner) => {
@@ -171,6 +175,10 @@ export function PartnersPage(props: Props) {
   const cityOptions = useMemo(
     () => Array.from(new Set(partners.map((p) => (p.city || "").trim()).filter(Boolean))),
     [partners]
+  );
+  const currencyNameByCode = useMemo(
+    () => new Map(currencies.map((c) => [c.code.toUpperCase(), c.name || ""])),
+    [currencies]
   );
 
   useEffect(() => {
@@ -225,6 +233,7 @@ export function PartnersPage(props: Props) {
       .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 1776))
       .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 1632))
       .replace(/٬/g, "")
+      .replace(/,/g, "")
       .replace(/،/g, ".")
       .trim();
     const amount = Number(normalized);
@@ -366,7 +375,11 @@ export function PartnersPage(props: Props) {
                 <tbody>
                   {pagedPartners.map((partner) => (
                     <tr key={partner.id}>
-                      <td className="customerName">{partner.name}</td>
+                      <td className="customerName">
+                        <Link className="customerProfileLink" to={`/partners/${partner.id}`}>
+                          {partner.name}
+                        </Link>
+                      </td>
                       <td>{partner.country || "-"}</td>
                       <td>{partner.city || "-"}</td>
                       <td>{(partnerTotals[partner.id]?.incoming ?? 0).toLocaleString("fa-AF")}</td>
@@ -374,6 +387,9 @@ export function PartnersPage(props: Props) {
                       <td>{(partnerTotals[partner.id]?.balance ?? 0).toLocaleString("fa-AF")}</td>
                       <td>
                         <div className="customerActions">
+                          <button className="navItem" type="button" onClick={() => setRawDetail({ title: t("recordDetails"), record: partner })}>
+                            {t("view")}
+                          </button>
                           <button className="navItem" type="button" onClick={() => openEditPartnerModal(partner)}>
                             {t("edit")}
                           </button>
@@ -447,15 +463,32 @@ export function PartnersPage(props: Props) {
               <table className="customerTable">
                 <thead>
                   <tr>
-                    <th>{t("currency")}</th>
+                    <th>{t("partnerAccountKataHeader")}</th>
                     <th>{t("balance")}</th>
+                    <th>{t("quickActions")}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {pagedBalances.map((account) => (
                     <tr key={account.id}>
-                      <td className="customerName">{account.currencyCode}</td>
+                      <td>
+                        <div className="customerName">
+                          {t("kataPrefix")} — {account.currencyCode}
+                        </div>
+                        {currencyNameByCode.get(account.currencyCode.toUpperCase())?.trim() ? (
+                          <div className="reportFilterSubtitle" style={{ marginTop: 4 }}>
+                            {currencyNameByCode.get(account.currencyCode.toUpperCase())}
+                          </div>
+                        ) : null}
+                      </td>
                       <td>{Number(account.balance).toLocaleString("fa-AF")}</td>
+                      <td>
+                        <div className="customerActions">
+                          <button className="navItem" type="button" onClick={() => setRawDetail({ title: t("recordDetails"), record: account })}>
+                            {t("view")}
+                          </button>
+                        </div>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -505,7 +538,8 @@ export function PartnersPage(props: Props) {
             >
               {currencies.map((currency) => (
                 <option key={currency.code} value={currency.code}>
-                  {currency.code}
+                  {t("kataPrefix")} — {currency.code}
+                  {currency.name?.trim() ? ` (${currency.name.trim()})` : ""}
                 </option>
               ))}
             </select>
@@ -654,7 +688,8 @@ export function PartnersPage(props: Props) {
               <option value="">{t("all")}</option>
               {currencies.map((currency) => (
                 <option key={currency.code} value={currency.code}>
-                  {currency.code}
+                  {t("kataPrefix")} — {currency.code}
+                  {currency.name?.trim() ? ` (${currency.name.trim()})` : ""}
                 </option>
               ))}
             </select>
@@ -724,9 +759,12 @@ export function PartnersPage(props: Props) {
                     <td>
                       <span className={`statusPill status-${tx.reconciliationStatus}`}>{t(tx.reconciliationStatus)}</span>
                     </td>
-                    <td>{new Date(tx.createdAt).toLocaleDateString("fa-AF")}</td>
+                    <td>{formatGregorianDate(tx.createdAt)}</td>
                     <td>
                       <div className="customerActions">
+                        <button className="navItem" type="button" onClick={() => setRawDetail({ title: t("recordDetails"), record: tx })}>
+                          {t("view")}
+                        </button>
                         <button className="navItem" type="button" onClick={() => openEditTxModal(tx)}>
                           {t("edit")}
                         </button>
@@ -775,7 +813,8 @@ export function PartnersPage(props: Props) {
             >
               {currencies.map((currency) => (
                 <option key={currency.code} value={currency.code}>
-                  {currency.code}
+                  {t("kataPrefix")} — {currency.code}
+                  {currency.name?.trim() ? ` (${currency.name.trim()})` : ""}
                 </option>
               ))}
             </select>
@@ -853,6 +892,14 @@ export function PartnersPage(props: Props) {
           </div>
         </form>
       </FormModal>
+      <RawDetailModal
+        isOpen={rawDetail !== null}
+        onClose={() => setRawDetail(null)}
+        title={rawDetail?.title ?? ""}
+        record={rawDetail?.record}
+        closeLabel={t("cancel")}
+        t={t}
+      />
     </section>
   );
 }
