@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { PaginationControls } from "../components/PaginationControls";
+import { apiUrl } from "../lib/apiBase";
 import { formatGregorianDate } from "../lib/formatDate";
 import { parseFxCashInNote, sourceAmountFromFxTarget } from "../lib/fxCashInDeposit";
 
@@ -78,13 +79,12 @@ export function CustomerDetailPage({ t, apiFetch, currencies }: Props) {
     setLoading(true);
     setNotFound(false);
     try {
-      const base = `http://localhost:4000`;
       const [cRes, aRes, dRes, sRes, xRes] = await Promise.all([
-        apiFetch(`${base}/customers/${customerId}`),
-        apiFetch(`${base}/customers/${customerId}/accounts`),
-        apiFetch(`${base}/deposits?customerId=${encodeURIComponent(customerId)}`),
-        apiFetch(`${base}/slips?customerId=${encodeURIComponent(customerId)}`),
-        apiFetch(`${base}/api/v1/exchanges?customerId=${encodeURIComponent(customerId)}`),
+        apiFetch(apiUrl(`/customers/${customerId}`)),
+        apiFetch(apiUrl(`/customers/${customerId}/accounts`)),
+        apiFetch(apiUrl(`/deposits?customerId=${encodeURIComponent(customerId)}`)),
+        apiFetch(apiUrl(`/slips?customerId=${encodeURIComponent(customerId)}`)),
+        apiFetch(apiUrl(`/api/v1/exchanges?customerId=${encodeURIComponent(customerId)}`)),
       ]);
       if (!cRes.ok) {
         setCustomer(null);

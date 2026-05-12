@@ -12,6 +12,7 @@ import { PartnersPage } from "./pages/PartnersPage";
 import { ReportsPage } from "./pages/ReportsPage";
 import { LoginPage } from "./pages/LoginPage";
 import { ProfilePage } from "./pages/ProfilePage";
+import { apiUrl } from "./lib/apiBase";
 import "./style.css";
 
 type PageKey = "dashboard" | "customers" | "deposits" | "slips" | "partners" | "reports" | "profile";
@@ -166,7 +167,7 @@ export default function AppClean() {
   const loadCustomers = async () => {
     setLoading(true);
     try {
-      const response = await apiFetch("http://localhost:4000/customers");
+      const response = await apiFetch(apiUrl("/customers"));
       const data = await response.json();
       const list = data.customers ?? [];
       setCustomers(list);
@@ -192,24 +193,24 @@ export default function AppClean() {
       setLoading(false);
     }
   };
-  const loadPartners = async () => { const r = await apiFetch("http://localhost:4000/partners"); setPartners((await r.json()).partners ?? []); };
-  const loadCurrencies = async () => { const r = await apiFetch("http://localhost:4000/currencies"); setCurrencies((await r.json()).currencies ?? []); };
-  const loadAccounts = async (customerId: string) => { if (!customerId) return setAccounts([]); const r = await apiFetch(`http://localhost:4000/customers/${customerId}/accounts`); setAccounts((await r.json()).accounts ?? []); };
+  const loadPartners = async () => { const r = await apiFetch(apiUrl("/partners")); setPartners((await r.json()).partners ?? []); };
+  const loadCurrencies = async () => { const r = await apiFetch(apiUrl("/currencies")); setCurrencies((await r.json()).currencies ?? []); };
+  const loadAccounts = async (customerId: string) => { if (!customerId) return setAccounts([]); const r = await apiFetch(apiUrl(`/customers/${customerId}/accounts`)); setAccounts((await r.json()).accounts ?? []); };
   const loadDeposits = async () => {
     const q = new URLSearchParams();
     if (depositHistoryFilters.customerId) q.set("customerId", depositHistoryFilters.customerId);
     if (depositHistoryFilters.currencyCode) q.set("currencyCode", depositHistoryFilters.currencyCode);
-    const r = await apiFetch(`http://localhost:4000/deposits?${q.toString()}`);
+    const r = await apiFetch(apiUrl(`/deposits?${q.toString()}`));
     setDeposits((await r.json()).deposits ?? []);
   };
-  const loadPartnerAccounts = async (partnerId: string) => { if (!partnerId) return setPartnerAccounts([]); const r = await apiFetch(`http://localhost:4000/partners/${partnerId}/accounts`); setPartnerAccounts((await r.json()).accounts ?? []); };
+  const loadPartnerAccounts = async (partnerId: string) => { if (!partnerId) return setPartnerAccounts([]); const r = await apiFetch(apiUrl(`/partners/${partnerId}/accounts`)); setPartnerAccounts((await r.json()).accounts ?? []); };
   const refreshSelectedCustomerAccounts = async () => {
     if (!depositForm.customerId) return;
     await loadAccounts(depositForm.customerId);
   };
-  const loadDashboard = async () => { const r = await apiFetch(`http://localhost:4000/dashboard/summary?currencyCode=${dashboard.currencyCode}`); const d = await r.json(); if (r.ok) setDashboard({ currencyCode: d.currencyCode, incoming: Number(d.incoming || 0), outgoing: Number(d.outgoing || 0), balance: Number(d.balance || 0), todayNet: Number(d.todayNet || 0), pendingSettlements: Number(d.pendingSettlements || 0) }); };
-  const loadBalanceReports = async () => { const [a, b] = await Promise.all([apiFetch("http://localhost:4000/reports/customer-balances"), apiFetch("http://localhost:4000/reports/partner-balances")]); setCustomerBalanceReport((await a.json()).accounts ?? []); setPartnerBalanceReport((await b.json()).accounts ?? []); };
-  const loadPartnerTxs = async () => { const r = await apiFetch("http://localhost:4000/partner-transactions"); setPartnerTxs((await r.json()).transactions ?? []); };
+  const loadDashboard = async () => { const r = await apiFetch(apiUrl(`/dashboard/summary?currencyCode=${dashboard.currencyCode}`)); const d = await r.json(); if (r.ok) setDashboard({ currencyCode: d.currencyCode, incoming: Number(d.incoming || 0), outgoing: Number(d.outgoing || 0), balance: Number(d.balance || 0), todayNet: Number(d.todayNet || 0), pendingSettlements: Number(d.pendingSettlements || 0) }); };
+  const loadBalanceReports = async () => { const [a, b] = await Promise.all([apiFetch(apiUrl("/reports/customer-balances")), apiFetch(apiUrl("/reports/partner-balances"))]); setCustomerBalanceReport((await a.json()).accounts ?? []); setPartnerBalanceReport((await b.json()).accounts ?? []); };
+  const loadPartnerTxs = async () => { const r = await apiFetch(apiUrl("/partner-transactions")); setPartnerTxs((await r.json()).transactions ?? []); };
   const loadSlips = useCallback(async () => {
     setSlipsLoading(true);
     try {
@@ -220,7 +221,7 @@ export default function AppClean() {
       if (f.currencyCode) q.set("currencyCode", f.currencyCode);
       if (f.from) q.set("from", f.from);
       if (f.to) q.set("to", f.to);
-      const r = await apiFetch(`http://localhost:4000/slips?${q.toString()}`);
+      const r = await apiFetch(apiUrl(`/slips?${q.toString()}`));
       const data = (await r.json()) as { slips?: typeof slips };
       if (r.ok) setSlips(data.slips ?? []);
     } finally {
@@ -228,10 +229,10 @@ export default function AppClean() {
     }
   }, []);
 
-  const onCreateCustomer = async (payload: { fullName: string; phone: string; idNumber: string; notes: string }) => { if (!payload.fullName.trim()) return false; setSaving(true); try { const r = await apiFetch("http://localhost:4000/customers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }); if (!r.ok) return false; await loadCustomers(); return true; } finally { setSaving(false); } };
-  const onUpdateCustomer = async (customerId: string, payload: { fullName: string; phone: string; idNumber: string; notes: string }) => { const r = await apiFetch(`http://localhost:4000/customers/${customerId}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }); if (!r.ok) return false; await loadCustomers(); return true; };
+  const onCreateCustomer = async (payload: { fullName: string; phone: string; idNumber: string; notes: string }) => { if (!payload.fullName.trim()) return false; setSaving(true); try { const r = await apiFetch(apiUrl("/customers"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }); if (!r.ok) return false; await loadCustomers(); return true; } finally { setSaving(false); } };
+  const onUpdateCustomer = async (customerId: string, payload: { fullName: string; phone: string; idNumber: string; notes: string }) => { const r = await apiFetch(apiUrl(`/customers/${customerId}`), { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }); if (!r.ok) return false; await loadCustomers(); return true; };
   const onDeleteCustomer = async (customerId: string): Promise<{ ok: true } | { ok: false; error: string }> => {
-    const r = await apiFetch(`http://localhost:4000/customers/${customerId}`, { method: "DELETE" });
+    const r = await apiFetch(apiUrl(`/customers/${customerId}`), { method: "DELETE" });
     let error = "UNKNOWN";
     try {
       const d = (await r.json()) as { error?: string };
@@ -257,7 +258,7 @@ export default function AppClean() {
           setDepositMessage(t("exchangeInvalidInput"));
           return;
         }
-        const r = await apiFetch("http://localhost:4000/api/v1/exchanges", {
+        const r = await apiFetch(apiUrl("/api/v1/exchanges"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -300,7 +301,7 @@ export default function AppClean() {
           return;
         }
       } else {
-        const r = await apiFetch("http://localhost:4000/deposits", {
+        const r = await apiFetch(apiUrl("/deposits"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -334,7 +335,7 @@ export default function AppClean() {
     setDepositSaving(true);
     setDepositMessage("");
     try {
-      const r = await apiFetch(`http://localhost:4000/deposits/${depositId}`, {
+      const r = await apiFetch(apiUrl(`/deposits/${depositId}`), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -361,7 +362,7 @@ export default function AppClean() {
     setDepositSaving(true);
     setDepositMessage("");
     try {
-      const r = await apiFetch(`http://localhost:4000/deposits/${depositId}`, { method: "DELETE" });
+      const r = await apiFetch(apiUrl(`/deposits/${depositId}`), { method: "DELETE" });
       const d = (await r.json()) as { error?: string };
       if (!r.ok) {
         setDepositMessage(
@@ -389,7 +390,7 @@ export default function AppClean() {
     setSlipSaving(true);
     setSlipMessage("");
     try {
-      const r = await apiFetch("http://localhost:4000/slips", {
+      const r = await apiFetch(apiUrl("/slips"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -430,7 +431,7 @@ export default function AppClean() {
         refreshSelectedCustomerAccounts(),
         (async () => {
           if (!slipForm.customerId) return;
-          const r = await apiFetch(`http://localhost:4000/customers/${slipForm.customerId}/accounts`);
+          const r = await apiFetch(apiUrl(`/customers/${slipForm.customerId}/accounts`));
           const data = (await r.json()) as { accounts?: typeof slipCustomerAccounts };
           if (r.ok) setSlipCustomerAccounts(data.accounts ?? []);
         })(),
@@ -440,7 +441,7 @@ export default function AppClean() {
       setSlipSaving(false);
     }
   };
-  const setSlipStatus = async (slipCode: string, status: "cancelled" | "expired") => { const r = await apiFetch(`http://localhost:4000/slips/${encodeURIComponent(slipCode)}/status`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) }); const d = await r.json(); if (!r.ok) return setSlipMessage(d.error || "Error"); if (slipLookup?.slipCode === slipCode) setSlipLookup(d.slip); await loadSlips(); };
+  const setSlipStatus = async (slipCode: string, status: "cancelled" | "expired") => { const r = await apiFetch(apiUrl(`/slips/${encodeURIComponent(slipCode)}/status`), { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) }); const d = await r.json(); if (!r.ok) return setSlipMessage(d.error || "Error"); if (slipLookup?.slipCode === slipCode) setSlipLookup(d.slip); await loadSlips(); };
   const onUpdateSlip = async (
     slipCode: string,
     payload: {
@@ -455,7 +456,7 @@ export default function AppClean() {
     setSlipMutating(true);
     setSlipMessage("");
     try {
-      const r = await apiFetch(`http://localhost:4000/slips/${encodeURIComponent(slipCode)}`, {
+      const r = await apiFetch(apiUrl(`/slips/${encodeURIComponent(slipCode)}`), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -488,7 +489,7 @@ export default function AppClean() {
     setSlipMutating(true);
     setSlipMessage("");
     try {
-      const r = await apiFetch(`http://localhost:4000/slips/${encodeURIComponent(slipCode)}`, { method: "DELETE" });
+      const r = await apiFetch(apiUrl(`/slips/${encodeURIComponent(slipCode)}`), { method: "DELETE" });
       let d: { error?: string } = {};
       try {
         d = (await r.json()) as { error?: string };
@@ -519,7 +520,7 @@ export default function AppClean() {
     setPartnerSaving(true);
     setPartnerMessage("");
     try {
-      const r = await apiFetch("http://localhost:4000/partners", {
+      const r = await apiFetch(apiUrl("/partners"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(partnerForm),
@@ -543,7 +544,7 @@ export default function AppClean() {
     setPartnerSaving(true);
     setPartnerMessage("");
     try {
-      const r = await apiFetch(`http://localhost:4000/partners/${partnerId}`, {
+      const r = await apiFetch(apiUrl(`/partners/${partnerId}`), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -562,7 +563,7 @@ export default function AppClean() {
     setPartnerSaving(true);
     setPartnerMessage("");
     try {
-      const r = await apiFetch(`http://localhost:4000/partners/${partnerId}`, { method: "DELETE" });
+      const r = await apiFetch(apiUrl(`/partners/${partnerId}`), { method: "DELETE" });
       let d: { error?: string } = {};
       try {
         d = (await r.json()) as { error?: string };
@@ -592,7 +593,7 @@ export default function AppClean() {
     setPartnerTxSaving(true);
     setPartnerMessage("");
     try {
-      const r = await apiFetch("http://localhost:4000/partner-transactions", {
+      const r = await apiFetch(apiUrl("/partner-transactions"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...partnerTxForm, amount }),
@@ -644,7 +645,7 @@ export default function AppClean() {
     setPartnerTxSaving(true);
     setPartnerMessage("");
     try {
-      const r = await apiFetch(`http://localhost:4000/partner-transactions/${txId}`, {
+      const r = await apiFetch(apiUrl(`/partner-transactions/${txId}`), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -682,7 +683,7 @@ export default function AppClean() {
     setPartnerTxSaving(true);
     setPartnerMessage("");
     try {
-      const r = await apiFetch(`http://localhost:4000/partner-transactions/${txId}`, { method: "DELETE" });
+      const r = await apiFetch(apiUrl(`/partner-transactions/${txId}`), { method: "DELETE" });
       const d = (await r.json()) as { error?: string };
       if (!r.ok) {
         setPartnerMessage(
@@ -697,7 +698,7 @@ export default function AppClean() {
       setPartnerTxSaving(false);
     }
   };
-  const onLogin = async (e: FormEvent) => { e.preventDefault(); setAuthError(""); setAuthSaving(true); try { const r = await fetch("http://localhost:4000/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(authForm) }); const d = await r.json(); if (!r.ok) return setAuthError(t("loginFailed")); localStorage.setItem("auth_token", d.token); localStorage.setItem("auth_user", JSON.stringify(d.user)); setToken(d.token); setCurrentUser(d.user); setAuthForm({ username: "", password: "" }); navigate("/dashboard", { replace: true }); } finally { setAuthSaving(false); } };
+  const onLogin = async (e: FormEvent) => { e.preventDefault(); setAuthError(""); setAuthSaving(true); try { const r = await fetch(apiUrl("/auth/login"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(authForm) }); const d = await r.json(); if (!r.ok) return setAuthError(t("loginFailed")); localStorage.setItem("auth_token", d.token); localStorage.setItem("auth_user", JSON.stringify(d.user)); setToken(d.token); setCurrentUser(d.user); setAuthForm({ username: "", password: "" }); navigate("/dashboard", { replace: true }); } finally { setAuthSaving(false); } };
   const onLogout = () => { localStorage.removeItem("auth_token"); localStorage.removeItem("auth_user"); setToken(""); setCurrentUser(null); };
   const onUpdateProfile = async (e: FormEvent) => {
     e.preventDefault();
@@ -720,7 +721,7 @@ export default function AppClean() {
         payload.currentPassword = profileForm.currentPassword;
         payload.newPassword = profileForm.newPassword;
       }
-      const r = await apiFetch("http://localhost:4000/auth/me", {
+      const r = await apiFetch(apiUrl("/auth/me"), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -768,7 +769,7 @@ export default function AppClean() {
     if (depositHistoryFilters.customerId) q.set("customerId", depositHistoryFilters.customerId);
     if (depositHistoryFilters.currencyCode) q.set("currencyCode", depositHistoryFilters.currencyCode);
     void (async () => {
-      const r = await apiFetch(`http://localhost:4000/deposits?${q.toString()}`);
+      const r = await apiFetch(apiUrl(`/deposits?${q.toString()}`));
       setDeposits((await r.json()).deposits ?? []);
     })();
   }, [token, depositHistoryFilters.customerId, depositHistoryFilters.currencyCode]);
@@ -800,7 +801,7 @@ export default function AppClean() {
       return;
     }
     void (async () => {
-      const r = await apiFetch(`http://localhost:4000/customers/${customerId}/accounts`);
+      const r = await apiFetch(apiUrl(`/customers/${customerId}/accounts`));
       const data = (await r.json()) as { accounts?: typeof slipCustomerAccounts };
       if (r.ok) setSlipCustomerAccounts(data.accounts ?? []);
     })();

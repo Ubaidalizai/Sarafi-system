@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { PaginationControls } from "../components/PaginationControls";
+import { apiUrl } from "../lib/apiBase";
 import { formatGregorianDate } from "../lib/formatDate";
 
 type Partner = {
@@ -55,11 +56,10 @@ export function PartnerDetailPage({ t, apiFetch, currencies }: Props) {
     setLoading(true);
     setNotFound(false);
     try {
-      const base = `http://localhost:4000`;
       const [pRes, aRes, txRes] = await Promise.all([
-        apiFetch(`${base}/partners/${partnerId}`),
-        apiFetch(`${base}/partners/${partnerId}/accounts`),
-        apiFetch(`${base}/partner-transactions?partnerId=${encodeURIComponent(partnerId)}`),
+        apiFetch(apiUrl(`/partners/${partnerId}`)),
+        apiFetch(apiUrl(`/partners/${partnerId}/accounts`)),
+        apiFetch(apiUrl(`/partner-transactions?partnerId=${encodeURIComponent(partnerId)}`)),
       ]);
       if (!pRes.ok) {
         setPartner(null);
