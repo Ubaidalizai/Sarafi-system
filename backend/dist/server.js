@@ -208,14 +208,14 @@ const defaultCurrencies = [
     { code: "PKR", name: "Pakistani Rupee" },
     { code: "TOMAN", name: "Toman" },
 ];
-/** Next slip code: "0", "1", "2", … (numeric string; ignores legacy non-numeric slipCode rows). */
+/** Next slip code: "1", "2", "3", … (numeric string; ignores legacy non-numeric slipCode rows). */
 const nextNumericSlipCode = async (tx) => {
     const rows = await tx.$queryRaw `
-    SELECT COALESCE(MAX(CAST(slipCode AS INTEGER)), -1) + 1 AS n
+    SELECT COALESCE(MAX(CAST(slipCode AS INTEGER)), 0) + 1 AS n
     FROM Slip
     WHERE slipCode GLOB '[0-9]*'
   `;
-    return String(Number(rows[0]?.n ?? 0));
+    return String(Number(rows[0]?.n ?? 1));
 };
 const firstParam = (value) => {
     if (typeof value === "string")

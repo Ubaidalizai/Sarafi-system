@@ -759,6 +759,10 @@ export default function AppClean() {
     void loadSlips();
   }, [token, slipFilters, loadSlips]);
   useEffect(() => {
+    if (!token || location.pathname !== "/slips") return;
+    void loadSlips();
+  }, [token, location.pathname, loadSlips]);
+  useEffect(() => {
     if (!token) return;
     const q = new URLSearchParams();
     if (depositHistoryFilters.customerId) q.set("customerId", depositHistoryFilters.customerId);
@@ -876,20 +880,6 @@ export default function AppClean() {
           </div>
         </aside>
         <div className="mainArea">
-          <header className="topbar">
-            <div className="topbarContent">
-              <div className="brand">
-                <div className="brandMark" aria-hidden="true" />
-                <div className="brandText">
-                  <div className="brandName">{t("appName")}</div>
-                  <div className="brandSub">{t(activePage === "deposits" ? "depositModule" : activePage)}</div>
-                </div>
-              </div>
-              <div className="topbarPageChip">
-                {t(activePage === "deposits" ? "depositModule" : activePage)}
-              </div>
-            </div>
-          </header>
           <main className="content">
             <Routes>
               <Route path="/" element={<Navigate to="/dashboard" replace />} />

@@ -229,7 +229,6 @@ export function SlipsPage(props: Props) {
           </label>
           {slipForm.customerId ? (
             <div className="depositBalanceCustomerBox" role="status" style={{ marginBottom: "12px" }}>
-              <div className="depositBalanceCustomerLabel">{t("slipIssueBalanceHint")}</div>
               {slipCustomerAccounts.length === 0 ? (
                 <div className="emptyText">{t("noBalances")}</div>
               ) : (
