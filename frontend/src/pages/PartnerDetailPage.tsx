@@ -27,6 +27,13 @@ type PartnerTxRow = {
   note?: string | null;
   reconciliationStatus: "pending" | "confirmed" | "disputed";
   createdAt: string;
+  slipId?: string | null;
+  slip?: {
+    slipCode: string;
+    paidAt?: string | null;
+    createdAt: string;
+    customer?: { fullName: string } | null;
+  } | null;
 };
 
 type Props = {
@@ -91,6 +98,8 @@ export function PartnerDetailPage({ t, apiFetch, currencies }: Props) {
     () => transactions.slice((txPage - 1) * pageSize, txPage * pageSize),
     [transactions, txPage]
   );
+
+  const slipDeductionTxs = useMemo(() => transactions.filter((tx) => Boolean(tx.slipId)), [transactions]);
 
   if (!partnerId) {
     return (
@@ -178,6 +187,46 @@ export function PartnerDetailPage({ t, apiFetch, currencies }: Props) {
             )}
           </div>
 
+          {slipDeductionTxs.length > 0 ? (
+            <div className="card listCard customersListCard">
+              <div className="listHeader">
+                <div className="heroTitle">{t("partnerSlipDeductionsTitle")}</div>
+              </div>
+              <p className="reportFilterSubtitle" style={{ marginBottom: 12 }}>
+                {t("partnerSlipDeductionsSub")}
+              </p>
+              <div className="customerTableWrap customerDetailTableWrap">
+                <table className="customerTable">
+                  <thead>
+                    <tr>
+                      <th>{t("slipCode")}</th>
+                      <th>{t("currency")}</th>
+                      <th>{t("amount")}</th>
+                      <th>{t("slipPaidToName")}</th>
+                      <th>{t("customers")}</th>
+                      <th>{t("createdAt")}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {slipDeductionTxs.map((tx) => {
+                      const when = tx.slip?.paidAt ?? tx.slip?.createdAt ?? tx.createdAt;
+                      return (
+                        <tr key={tx.id}>
+                          <td className="customerName">{tx.referenceNo?.trim() || tx.slip?.slipCode || "—"}</td>
+                          <td>{tx.currencyCode}</td>
+                          <td>{Number(tx.amount).toLocaleString("fa-AF")}</td>
+                          <td>{tx.beneficiaryName?.trim() || "—"}</td>
+                          <td>{tx.slip?.customer?.fullName?.trim() || "—"}</td>
+                          <td>{formatGregorianDate(when)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : null}
+
           <div className="card listCard customersListCard">
             <div className="listHeader">
               <div className="heroTitle">{t("partnerDetailTxHistory")}</div>
@@ -215,7 +264,9 @@ export function PartnerDetailPage({ t, apiFetch, currencies }: Props) {
                           <td>
                             <span className={`statusPill status-${tx.reconciliationStatus}`}>{t(tx.reconciliationStatus)}</span>
                           </td>
-                          <td className="customerDetailNoteCell">{tx.note?.trim() || "—"}</td>
+                          <td className="customerDetailNoteCell">
+                            {tx.note?.trim() === "SLIP_PAYOUT" ? t("partnerTxNoteSlipPayout") : tx.note?.trim() || "—"}
+                          </td>
                           <td>{formatGregorianDate(tx.createdAt)}</td>
                         </tr>
                       ))}

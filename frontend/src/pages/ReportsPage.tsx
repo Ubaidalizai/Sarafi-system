@@ -1,7 +1,11 @@
 import { useMemo, useState } from "react";
+import { IconEye, IconPrint } from "../components/ActionIcons";
+import { IconTooltipButton } from "../components/IconTooltipButton";
 import { PaginationControls } from "../components/PaginationControls";
 import { RawDetailModal } from "../components/RawDetailModal";
 import { formatGregorianDate } from "../lib/formatDate";
+import { printSlipDocument } from "../lib/printSlip";
+import { normalizeSlipReviewStatus } from "../lib/slipReviewStatus";
 
 type Props = {
   t: (key: string) => string;
@@ -13,7 +17,15 @@ type Props = {
     currencyCode: string;
     amount: string;
     status: "issued" | "paid" | "cancelled" | "expired";
+    reviewStatus?: "waiting" | "confirmed" | "rejected";
     createdAt: string;
+    receiverName?: string | null;
+    paidToName?: string | null;
+    note?: string | null;
+    fundingAccountId?: string | null;
+    fundingAccount?: { id: string; displayName: string } | null;
+    partnerAccountId?: string | null;
+    partnerAccount?: { id: string; currencyCode: string; partner: { id: string; name: string } } | null;
     customer?: { fullName: string; phone?: string | null };
   }>;
   customerBalanceReport: Array<{
@@ -32,6 +44,10 @@ type Props = {
 
 export function ReportsPage(props: Props) {
   const { t, loadBalanceReports, loadSlips, slips, customerBalanceReport, partnerBalanceReport } = props;
+  const slipCashSourceCell = (slip: (typeof slips)[number]) =>
+    slip.partnerAccountId && slip.partnerAccount?.partner?.name
+      ? `${slip.partnerAccount.partner.name} — ${t("slipSourcePartnerTag")} (${slip.currencyCode})`
+      : slip.fundingAccount?.displayName?.trim() || slip.receiverName?.trim() || "—";
   const [customerPage, setCustomerPage] = useState(1);
   const [slipsPage, setSlipsPage] = useState(1);
   const [partnerPage, setPartnerPage] = useState(1);
@@ -76,6 +92,10 @@ export function ReportsPage(props: Props) {
   const maxCustomerTotal = Math.max(1, ...customerCurrencyTotals.map((x) => x.value));
   const maxPartnerTotal = Math.max(1, ...partnerCurrencyTotals.map((x) => x.value));
   const maxSlipStatus = Math.max(1, ...slipStatusTotals.map((x) => x.value));
+  const slipReviewLabel = (slip: (typeof slips)[number]) => {
+    const r = normalizeSlipReviewStatus(slip.reviewStatus);
+    return r === "confirmed" ? t("slipReviewConfirmed") : r === "rejected" ? t("slipReviewRejected") : t("slipReviewWaiting");
+  };
   return (
     <section className="customersPageRoot">
       <div className="card formCard customersPageHeaderCard">
@@ -164,10 +184,14 @@ export function ReportsPage(props: Props) {
                     <td>{row.currencyCode}</td>
                     <td>{Number(row.balance).toLocaleString("fa-AF")}</td>
                     <td>
-                      <div className="customerActions">
-                        <button className="navItem" type="button" onClick={() => setRawDetail({ title: t("recordDetails"), record: row })}>
-                          {t("view")}
-                        </button>
+                      <div className="customerActions slipRowActions">
+                        <IconTooltipButton
+                          className="iconActionBtn"
+                          tooltip={t("view")}
+                          onClick={() => setRawDetail({ title: t("recordDetails"), record: row })}
+                        >
+                          <IconEye />
+                        </IconTooltipButton>
                       </div>
                     </td>
                   </tr>
@@ -201,9 +225,11 @@ export function ReportsPage(props: Props) {
                 <tr>
                   <th>{t("slipCode")}</th>
                   <th>{t("customers")}</th>
+                  <th>{t("slipCashSource")}</th>
                   <th>{t("currency")}</th>
                   <th>{t("amount")}</th>
                   <th>{t("status")}</th>
+                  <th>{t("slipReviewStatus")}</th>
                   <th>{t("createdAt")}</th>
                   <th>{t("quickActions")}</th>
                 </tr>
@@ -213,15 +239,50 @@ export function ReportsPage(props: Props) {
                   <tr key={slip.id}>
                     <td className="customerName">{slip.slipCode}</td>
                     <td>{slip.customer?.fullName || "-"}</td>
+                    <td>{slipCashSourceCell(slip)}</td>
                     <td>{slip.currencyCode}</td>
                     <td>{Number(slip.amount).toLocaleString("fa-AF")}</td>
                     <td>{t(slip.status)}</td>
+                    <td>
+                      {normalizeSlipReviewStatus(slip.reviewStatus) === "confirmed"
+                        ? t("slipReviewConfirmed")
+                        : normalizeSlipReviewStatus(slip.reviewStatus) === "rejected"
+                          ? t("slipReviewRejected")
+                          : t("slipReviewWaiting")}
+                    </td>
                     <td>{formatGregorianDate(slip.createdAt)}</td>
                     <td>
-                      <div className="customerActions">
-                        <button className="navItem" type="button" onClick={() => setRawDetail({ title: t("recordDetails"), record: slip })}>
-                          {t("view")}
-                        </button>
+                      <div className="customerActions slipRowActions">
+                        <IconTooltipButton
+                          className="iconActionBtn"
+                          tooltip={t("view")}
+                          onClick={() => setRawDetail({ title: t("recordDetails"), record: slip })}
+                        >
+                          <IconEye />
+                        </IconTooltipButton>
+                        <IconTooltipButton
+                          className="iconActionBtn"
+                          tooltip={t("printSlip")}
+                          onClick={() =>
+                            printSlipDocument(slip, {
+                              slipPrintHeading: t("slipDetails"),
+                              slipCode: t("slipCode"),
+                              customers: t("customers"),
+                              accountName: t("accountName"),
+                              slipPaidToName: t("slipPaidToName"),
+                              currency: t("currency"),
+                              amount: t("amount"),
+                              status: t("status"),
+                              slipReviewStatus: t("slipReviewStatus"),
+                              createdAt: t("createdAt"),
+                              notes: t("notes"),
+                              slipStatusValue: t(slip.status),
+                              slipReviewValue: slipReviewLabel(slip),
+                            })
+                          }
+                        >
+                          <IconPrint />
+                        </IconTooltipButton>
                       </div>
                     </td>
                   </tr>
@@ -266,10 +327,14 @@ export function ReportsPage(props: Props) {
                     <td>{row.currencyCode}</td>
                     <td>{Number(row.balance).toLocaleString("fa-AF")}</td>
                     <td>
-                      <div className="customerActions">
-                        <button className="navItem" type="button" onClick={() => setRawDetail({ title: t("recordDetails"), record: row })}>
-                          {t("view")}
-                        </button>
+                      <div className="customerActions slipRowActions">
+                        <IconTooltipButton
+                          className="iconActionBtn"
+                          tooltip={t("view")}
+                          onClick={() => setRawDetail({ title: t("recordDetails"), record: row })}
+                        >
+                          <IconEye />
+                        </IconTooltipButton>
                       </div>
                     </td>
                   </tr>

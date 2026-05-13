@@ -25,6 +25,13 @@ enum SlipStatus {
   expired
 }
 
+/** Desk / office handling of a slip (can be changed anytime). */
+enum SlipReviewStatus {
+  waiting
+  confirmed
+  rejected
+}
+
 enum PartnerTxDirection {
   in
   out
@@ -59,6 +66,7 @@ model Currency {
   slips Slip[]
   partnerAccounts PartnerAccount[]
   partnerTransactions PartnerTransaction[]
+  fundingRepayments FundingAccountRepayment[]
 }
 
 model Customer {
@@ -136,18 +144,61 @@ model Slip {
   customerId String
   currencyCode String
   amount Decimal
+  /** Source-of-funds desk account (e.g. lender / Kata); slip list shows this name. */
+  fundingAccountId String?
+  /** When set, cash for this slip is drawn from this partner balance (not a funding desk account). */
+  partnerAccountId String?
   receiverName String?
   /** Person/counterparty to whom cash is paid (distinct from bank account label). */
   paidToName String?
   note String?
   status SlipStatus @default(issued)
+  reviewStatus SlipReviewStatus @default(waiting)
   paidAt DateTime?
 
   customer Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
   currency Currency @relation(fields: [currencyCode], references: [code], onDelete: Restrict)
+  fundingAccount FundingAccount? @relation(fields: [fundingAccountId], references: [id], onDelete: Restrict)
+  partnerAccount PartnerAccount? @relation(fields: [partnerAccountId], references: [id], onDelete: Restrict)
+  /** Ledger line created when a partner-funded slip is paid (one row per slip). */
+  partnerPayoutTx PartnerTransaction? @relation("SlipPartnerLedger")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([fundingAccountId])
+  @@index([partnerAccountId])
+}
+
+/** External desk account whose cash backs slips (e.g. Abdul Rahman — old Kata). */
+model FundingAccount {
+  id          String  @id @default(cuid())
+  displayName String
+  phone       String?
+  notes       String?
+  isActive    Boolean @default(true)
+
+  slips       Slip[]
+  repayments  FundingAccountRepayment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/** Direct repayment to a funding account (not through a slip). */
+model FundingAccountRepayment {
+  id               String   @id @default(cuid())
+  fundingAccountId String
+  currencyCode     String
+  amount           Decimal
+  note             String?
+
+  fundingAccount FundingAccount @relation(fields: [fundingAccountId], references: [id], onDelete: Restrict)
+  currency       Currency       @relation(fields: [currencyCode], references: [code], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+
+  @@index([fundingAccountId])
 }
 
 model Partner {
@@ -173,6 +224,7 @@ model PartnerAccount {
 
   partner Partner @relation(fields: [partnerId], references: [id], onDelete: Cascade)
   currency Currency @relation(fields: [currencyCode], references: [code], onDelete: Restrict)
+  slips Slip[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -190,6 +242,9 @@ model PartnerTransaction {
   referenceNo String?
   note String?
   reconciliationStatus ReconciliationStatus @default(pending)
+  /** When set, this row was created automatically for slip payout (do not edit/delete manually). */
+  slipId String? @unique
+  slip Slip? @relation("SlipPartnerLedger", fields: [slipId], references: [id], onDelete: Restrict)
 
   partner Partner @relation(fields: [partnerId], references: [id], onDelete: Restrict)
   currency Currency @relation(fields: [currencyCode], references: [code], onDelete: Restrict)

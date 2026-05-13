@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { PaginationControls } from "../components/PaginationControls";
 import { apiUrl } from "../lib/apiBase";
 import { formatGregorianDate } from "../lib/formatDate";
+import { normalizeSlipReviewStatus } from "../lib/slipReviewStatus";
 import { parseFxCashInNote, sourceAmountFromFxTarget } from "../lib/fxCashInDeposit";
 
 type Customer = {
@@ -32,7 +33,12 @@ type SlipRow = {
   currencyCode: string;
   amount: string;
   status: "issued" | "paid" | "cancelled" | "expired";
+  reviewStatus?: "waiting" | "confirmed" | "rejected";
   receiverName?: string | null;
+  fundingAccountId?: string | null;
+  fundingAccount?: { id: string; displayName: string } | null;
+  partnerAccountId?: string | null;
+  partnerAccount?: { id: string; currencyCode: string; partner: { id: string; name: string } } | null;
   paidToName?: string | null;
   createdAt: string;
 };
@@ -52,11 +58,12 @@ type Props = {
   t: (key: string) => string;
   apiFetch: (url: string, init?: RequestInit) => Promise<Response>;
   currencies: Array<{ code: string; name: string }>;
+  onSlipReviewChange?: (slipCode: string, reviewStatus: "waiting" | "confirmed" | "rejected") => Promise<boolean>;
 };
 
 const pageSize = 8;
 
-export function CustomerDetailPage({ t, apiFetch, currencies }: Props) {
+export function CustomerDetailPage({ t, apiFetch, currencies, onSlipReviewChange }: Props) {
   const { customerId } = useParams();
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
@@ -68,6 +75,7 @@ export function CustomerDetailPage({ t, apiFetch, currencies }: Props) {
   const [depositsPage, setDepositsPage] = useState(1);
   const [slipsPage, setSlipsPage] = useState(1);
   const [exchangesPage, setExchangesPage] = useState(1);
+  const [slipReviewBusyCode, setSlipReviewBusyCode] = useState<string | null>(null);
 
   const currencyNameByCode = useMemo(
     () => new Map(currencies.map((c) => [c.code.toUpperCase(), c.name])),
@@ -288,9 +296,10 @@ export function CustomerDetailPage({ t, apiFetch, currencies }: Props) {
                         <th>{t("slipCode")}</th>
                         <th>{t("currency")}</th>
                         <th>{t("amount")}</th>
-                        <th>{t("accountName")}</th>
+                        <th>{t("slipCashSource")}</th>
                         <th>{t("slipPaidToName")}</th>
                         <th>{t("status")}</th>
+                        <th>{t("slipReviewStatus")}</th>
                         <th>{t("createdAt")}</th>
                       </tr>
                     </thead>
@@ -300,9 +309,46 @@ export function CustomerDetailPage({ t, apiFetch, currencies }: Props) {
                           <td className="customerName">{row.slipCode}</td>
                           <td>{row.currencyCode}</td>
                           <td>{Number(row.amount).toLocaleString("fa-AF")}</td>
-                          <td>{row.receiverName?.trim() || "—"}</td>
+                          <td>
+                            {row.partnerAccountId && row.partnerAccount?.partner?.name
+                              ? `${row.partnerAccount.partner.name} — ${t("slipSourcePartnerTag")} (${row.currencyCode})`
+                              : row.fundingAccount?.displayName?.trim() || row.receiverName?.trim() || "—"}
+                          </td>
                           <td>{row.paidToName?.trim() || "—"}</td>
                           <td>{t(row.status)}</td>
+                          <td>
+                            {onSlipReviewChange ? (
+                              <select
+                                className="sarafiSelect slipReviewSelect"
+                                aria-label={t("slipReviewStatus")}
+                                value={normalizeSlipReviewStatus(row.reviewStatus)}
+                                disabled={slipReviewBusyCode === row.slipCode}
+                                onChange={(e) => {
+                                  const next = e.target.value as "waiting" | "confirmed" | "rejected";
+                                  const cur = normalizeSlipReviewStatus(row.reviewStatus);
+                                  if (next === cur) return;
+                                  setSlipReviewBusyCode(row.slipCode);
+                                  void (async () => {
+                                    const ok = await onSlipReviewChange(row.slipCode, next);
+                                    setSlipReviewBusyCode(null);
+                                    if (ok) void loadAll();
+                                  })();
+                                }}
+                              >
+                                <option value="waiting">{t("slipReviewWaiting")}</option>
+                                <option value="confirmed">{t("slipReviewConfirmed")}</option>
+                                <option value="rejected">{t("slipReviewRejected")}</option>
+                              </select>
+                            ) : (
+                              <span className="reportFilterSubtitle">
+                                {normalizeSlipReviewStatus(row.reviewStatus) === "confirmed"
+                                  ? t("slipReviewConfirmed")
+                                  : normalizeSlipReviewStatus(row.reviewStatus) === "rejected"
+                                    ? t("slipReviewRejected")
+                                    : t("slipReviewWaiting")}
+                              </span>
+                            )}
+                          </td>
                           <td>{formatGregorianDate(row.createdAt)}</td>
                         </tr>
                       ))}

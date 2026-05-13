@@ -8,6 +8,8 @@ import { CustomerDetailPage } from "./pages/CustomerDetailPage";
 import { PartnerDetailPage } from "./pages/PartnerDetailPage";
 import { DepositsPage } from "./pages/DepositsPage";
 import { SlipsPage } from "./pages/SlipsPage";
+import { FundingAccountsPage } from "./pages/FundingAccountsPage";
+import { FundingAccountDetailPage } from "./pages/FundingAccountDetailPage";
 import { PartnersPage } from "./pages/PartnersPage";
 import { ReportsPage } from "./pages/ReportsPage";
 import { LoginPage } from "./pages/LoginPage";
@@ -15,7 +17,7 @@ import { ProfilePage } from "./pages/ProfilePage";
 import { apiUrl } from "./lib/apiBase";
 import "./style.css";
 
-type PageKey = "dashboard" | "customers" | "deposits" | "slips" | "partners" | "reports" | "profile";
+type PageKey = "dashboard" | "customers" | "deposits" | "slips" | "fundingAccounts" | "partners" | "reports" | "profile";
 
 export default function AppClean() {
   const { t } = useTranslation();
@@ -34,6 +36,7 @@ export default function AppClean() {
     "/customers": "customers",
     "/deposits": "deposits",
     "/slips": "slips",
+    "/funding-accounts": "fundingAccounts",
     "/partners": "partners",
     "/reports": "reports",
     "/profile": "profile",
@@ -43,6 +46,7 @@ export default function AppClean() {
     if (p.startsWith("/customers")) return "customers";
     if (p.startsWith("/deposits")) return "deposits";
     if (p.startsWith("/slips")) return "slips";
+    if (p.startsWith("/funding-accounts")) return "fundingAccounts";
     if (p.startsWith("/partners")) return "partners";
     if (p.startsWith("/reports")) return "reports";
     if (p.startsWith("/profile")) return "profile";
@@ -83,11 +87,11 @@ export default function AppClean() {
     customerId: "",
     currencyCode: "AFN",
     amount: "",
-    receiverName: "",
+    slipSource: "funding" as "funding" | "partner",
+    fundingAccountId: "",
+    partnerAccountId: "",
     paidToName: "",
     note: "",
-    /** always paid now at issue time */
-    markPaid: true,
   });
   const [slipSaving, setSlipSaving] = useState(false);
   const [slipMutating, setSlipMutating] = useState(false);
@@ -98,7 +102,12 @@ export default function AppClean() {
     currencyCode: string;
     amount: string;
     status: "issued" | "paid" | "cancelled" | "expired";
+    reviewStatus?: "waiting" | "confirmed" | "rejected";
     receiverName?: string | null;
+    fundingAccountId?: string | null;
+    fundingAccount?: { id: string; displayName: string } | null;
+    partnerAccountId?: string | null;
+    partnerAccount?: { id: string; currencyCode: string; partner: { id: string; name: string } } | null;
     paidToName?: string | null;
     customer?: { fullName: string; phone?: string | null };
   } | null>(null);
@@ -111,16 +120,25 @@ export default function AppClean() {
       currencyCode: string;
       amount: string;
       status: "issued" | "paid" | "cancelled" | "expired";
+      reviewStatus?: "waiting" | "confirmed" | "rejected";
       createdAt: string;
       receiverName?: string | null;
+      fundingAccountId?: string | null;
+      fundingAccount?: { id: string; displayName: string } | null;
+      partnerAccountId?: string | null;
+      partnerAccount?: { id: string; currencyCode: string; partner: { id: string; name: string } } | null;
       paidToName?: string | null;
       customer?: { fullName: string; phone?: string | null };
     }>
   >([]);
-  const [slipFilters, setSlipFilters] = useState({ customerId: "", status: "", currencyCode: "", from: "", to: "" });
+  const [slipFilters, setSlipFilters] = useState({ customerId: "", status: "", reviewStatus: "", currencyCode: "", from: "", to: "" });
   const slipFiltersRef = useRef(slipFilters);
   slipFiltersRef.current = slipFilters;
   const [slipCustomerAccounts, setSlipCustomerAccounts] = useState<Array<{ id: string; currencyCode: string; balance: string }>>([]);
+  const [fundingAccounts, setFundingAccounts] = useState<Array<{ id: string; displayName: string; isActive: boolean }>>([]);
+  const [slipPartnerAccountOptions, setSlipPartnerAccountOptions] = useState<
+    Array<{ id: string; partnerId: string; partnerName: string; currencyCode: string; balance: number }>
+  >([]);
   const [partners, setPartners] = useState<Array<{ id: string; name: string; country?: string | null; city?: string | null; contact?: string | null; notes?: string | null }>>([]);
   const [partnerForm, setPartnerForm] = useState({ name: "", country: "", city: "", contact: "", notes: "" });
   const [partnerSaving, setPartnerSaving] = useState(false);
@@ -218,6 +236,7 @@ export default function AppClean() {
       const q = new URLSearchParams();
       if (f.customerId) q.set("customerId", f.customerId);
       if (f.status) q.set("status", f.status);
+      if (f.reviewStatus) q.set("reviewStatus", f.reviewStatus);
       if (f.currencyCode) q.set("currencyCode", f.currencyCode);
       if (f.from) q.set("from", f.from);
       if (f.to) q.set("to", f.to);
@@ -228,6 +247,22 @@ export default function AppClean() {
       setSlipsLoading(false);
     }
   }, []);
+
+  const loadFundingAccounts = useCallback(async () => {
+    const r = await apiFetch(apiUrl("/funding-accounts"));
+    const data = (await r.json()) as {
+      accounts?: Array<{ id: string; displayName: string; isActive: boolean }>;
+    };
+    if (r.ok) setFundingAccounts(data.accounts ?? []);
+  }, [apiFetch]);
+
+  const loadSlipPartnerAccountOptions = useCallback(async () => {
+    const r = await apiFetch(apiUrl("/partner-accounts-for-slips"));
+    const data = (await r.json()) as {
+      accounts?: Array<{ id: string; partnerId: string; partnerName: string; currencyCode: string; balance: number }>;
+    };
+    if (r.ok) setSlipPartnerAccountOptions(data.accounts ?? []);
+  }, [apiFetch]);
 
   const onCreateCustomer = async (payload: { fullName: string; phone: string; idNumber: string; notes: string }) => { if (!payload.fullName.trim()) return false; setSaving(true); try { const r = await apiFetch(apiUrl("/customers"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }); if (!r.ok) return false; await loadCustomers(); return true; } finally { setSaving(false); } };
   const onUpdateCustomer = async (customerId: string, payload: { fullName: string; phone: string; idNumber: string; notes: string }) => { const r = await apiFetch(apiUrl(`/customers/${customerId}`), { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }); if (!r.ok) return false; await loadCustomers(); return true; };
@@ -384,24 +419,38 @@ export default function AppClean() {
   const onIssueSlip = async (e: FormEvent): Promise<boolean> => {
     e.preventDefault();
     const amount = parseLocalizedAmount(slipForm.amount);
-    if (!slipForm.customerId || !amount || amount <= 0 || !slipForm.receiverName.trim() || !slipForm.paidToName.trim()) {
+    const srcOk =
+      slipForm.slipSource === "funding"
+        ? Boolean(slipForm.fundingAccountId.trim())
+        : Boolean(slipForm.partnerAccountId.trim());
+    if (!slipForm.customerId || !amount || amount <= 0 || !srcOk || !slipForm.paidToName.trim()) {
       return false;
     }
     setSlipSaving(true);
     setSlipMessage("");
     try {
+      const body =
+        slipForm.slipSource === "funding"
+          ? {
+              customerId: slipForm.customerId,
+              currencyCode: slipForm.currencyCode,
+              amount,
+              fundingAccountId: slipForm.fundingAccountId,
+              paidToName: slipForm.paidToName.trim(),
+              note: slipForm.note.trim() || undefined,
+            }
+          : {
+              customerId: slipForm.customerId,
+              currencyCode: slipForm.currencyCode,
+              amount,
+              partnerAccountId: slipForm.partnerAccountId,
+              paidToName: slipForm.paidToName.trim(),
+              note: slipForm.note.trim() || undefined,
+            };
       const r = await apiFetch(apiUrl("/slips"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          customerId: slipForm.customerId,
-          currencyCode: slipForm.currencyCode,
-          amount,
-          receiverName: slipForm.receiverName,
-          paidToName: slipForm.paidToName.trim(),
-          note: slipForm.note.trim() || undefined,
-          markPaid: true,
-        }),
+        body: JSON.stringify(body),
       });
       const d = (await r.json()) as { slip?: NonNullable<typeof slipLookup>; error?: string };
       if (!r.ok) {
@@ -410,22 +459,31 @@ export default function AppClean() {
             ? t("insufficientBalanceSlipCurrency")
             : d.error === "NO_ACCOUNT_FOR_SLIP_CURRENCY"
               ? t("noAccountSlipCurrency")
-              : d.error || t("slipCreateFailed")
+              : d.error === "FUNDING_ACCOUNT_NOT_FOUND" || d.error === "FUNDING_ACCOUNT_INACTIVE"
+                ? t("slipNoFundingAccounts")
+                : d.error === "PARTNER_ACCOUNT_NOT_FOUND" || d.error === "PARTNER_SLIP_CURRENCY_MISMATCH"
+                  ? t("slipPartnerAccountInvalid")
+                  : d.error === "SLIP_SOURCE_REQUIRED"
+                    ? t("slipSourceRequired")
+                    : d.error || t("slipCreateFailed")
         );
         return false;
       }
       setSlipForm((p) => ({
         ...p,
         amount: "",
-        receiverName: "",
+        fundingAccountId: "",
+        partnerAccountId: "",
+        slipSource: "funding",
         paidToName: "",
         note: "",
-        markPaid: true,
       }));
       if (d.slip) setSlipLookup(d.slip);
       setSlipMessage(`${t("savedSuccessfully")} — ${d.slip?.slipCode ?? ""}`);
       await Promise.all([
         loadSlips(),
+        loadFundingAccounts(),
+        loadSlipPartnerAccountOptions(),
         loadDashboard(),
         loadBalanceReports(),
         refreshSelectedCustomerAccounts(),
@@ -442,13 +500,49 @@ export default function AppClean() {
     }
   };
   const setSlipStatus = async (slipCode: string, status: "cancelled" | "expired") => { const r = await apiFetch(apiUrl(`/slips/${encodeURIComponent(slipCode)}/status`), { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) }); const d = await r.json(); if (!r.ok) return setSlipMessage(d.error || "Error"); if (slipLookup?.slipCode === slipCode) setSlipLookup(d.slip); await loadSlips(); };
+  const patchSlipReviewStatus = async (slipCode: string, reviewStatus: "waiting" | "confirmed" | "rejected"): Promise<boolean> => {
+    const r = await apiFetch(apiUrl(`/slips/${encodeURIComponent(slipCode)}/review`), {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reviewStatus }),
+    });
+    let d: { slip?: typeof slipLookup; error?: unknown } = {};
+    try {
+      d = (await r.json()) as { slip?: typeof slipLookup; error?: unknown };
+    } catch {
+      d = {};
+    }
+    if (!r.ok) {
+      const err = typeof d.error === "string" ? d.error : "";
+      setSlipMessage(
+        err === "INSUFFICIENT_BALANCE"
+          ? t("insufficientBalanceSlipCurrency")
+          : err === "NO_ACCOUNT_FOR_SLIP_CURRENCY"
+            ? t("noAccountSlipCurrency")
+            : err === "INSUFFICIENT_PARTNER_BALANCE"
+              ? t("insufficientPartnerBalance")
+              : err === "PARTNER_ACCOUNT_NOT_FOUND" || err === "PARTNER_SLIP_CURRENCY_MISMATCH"
+                ? t("slipPartnerAccountInvalid")
+                : err === "SLIP_BAD_STATE"
+                  ? t("slipReviewBadState")
+                  : t("slipReviewUpdateFailed")
+      );
+      await loadSlips();
+      return false;
+    }
+    setSlipMessage("");
+    if (d.slip && slipLookup?.slipCode === slipCode) setSlipLookup(d.slip);
+    await Promise.all([loadSlips(), loadSlipPartnerAccountOptions()]);
+    return true;
+  };
   const onUpdateSlip = async (
     slipCode: string,
     payload: {
       customerId: string;
       currencyCode: string;
       amount: number;
-      receiverName: string;
+      fundingAccountId?: string;
+      partnerAccountId?: string;
       paidToName: string;
       note: string;
     }
@@ -461,7 +555,6 @@ export default function AppClean() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...payload,
-          receiverName: payload.receiverName.trim(),
           paidToName: payload.paidToName.trim(),
           note: payload.note || undefined,
         }),
@@ -471,15 +564,28 @@ export default function AppClean() {
         setSlipMessage(
           d.error === "SLIP_NOT_EDITABLE"
             ? t("slipNotEditable")
-            : d.error === "CUSTOMER_NOT_FOUND" || d.error === "CURRENCY_NOT_FOUND"
+            : d.error === "CUSTOMER_NOT_FOUND" || d.error === "CURRENCY_NOT_FOUND" || d.error === "FUNDING_ACCOUNT_NOT_FOUND"
               ? t("notFound")
-              : d.error || t("slipUpdateFailed")
+              : d.error === "FUNDING_ACCOUNT_INACTIVE"
+                ? t("fundingAccountInactive")
+                : d.error === "PARTNER_ACCOUNT_NOT_FOUND" || d.error === "PARTNER_SLIP_CURRENCY_MISMATCH"
+                  ? t("slipPartnerAccountInvalid")
+                  : d.error === "SLIP_SOURCE_REQUIRED"
+                    ? t("slipSourceRequired")
+                    : d.error || t("slipUpdateFailed")
         );
         return false;
       }
       setSlipMessage(t("savedSuccessfully"));
       if (d.slip && slipLookup?.slipCode === slipCode) setSlipLookup(d.slip);
-      await Promise.all([loadSlips(), loadDashboard(), loadBalanceReports(), refreshSelectedCustomerAccounts()]);
+      await Promise.all([
+        loadSlips(),
+        loadFundingAccounts(),
+        loadSlipPartnerAccountOptions(),
+        loadDashboard(),
+        loadBalanceReports(),
+        refreshSelectedCustomerAccounts(),
+      ]);
       return true;
     } finally {
       setSlipMutating(false);
@@ -508,7 +614,7 @@ export default function AppClean() {
       }
       setSlipMessage(t("savedSuccessfully"));
       if (slipLookup?.slipCode === slipCode) setSlipLookup(null);
-      await Promise.all([loadSlips(), loadDashboard(), loadBalanceReports()]);
+      await Promise.all([loadSlips(), loadDashboard(), loadBalanceReports(), loadSlipPartnerAccountOptions()]);
       return true;
     } finally {
       setSlipMutating(false);
@@ -753,7 +859,15 @@ export default function AppClean() {
 
   useEffect(() => {
     if (!token) return;
-    Promise.all([loadCustomers(), loadPartners(), loadCurrencies(), loadBalanceReports(), loadPartnerTxs()]);
+    void Promise.all([
+      loadCustomers(),
+      loadPartners(),
+      loadCurrencies(),
+      loadBalanceReports(),
+      loadPartnerTxs(),
+      loadFundingAccounts(),
+      loadSlipPartnerAccountOptions(),
+    ]);
   }, [token]);
   useEffect(() => {
     if (!token) return;
@@ -761,8 +875,8 @@ export default function AppClean() {
   }, [token, slipFilters, loadSlips]);
   useEffect(() => {
     if (!token || location.pathname !== "/slips") return;
-    void loadSlips();
-  }, [token, location.pathname, loadSlips]);
+    void Promise.all([loadSlips(), loadSlipPartnerAccountOptions()]);
+  }, [token, location.pathname, loadSlips, loadSlipPartnerAccountOptions]);
   useEffect(() => {
     if (!token) return;
     const q = new URLSearchParams();
@@ -791,6 +905,7 @@ export default function AppClean() {
     if (p.startsWith("/customers/") && p.length > "/customers/".length) return;
     /** Partner detail: `/partners/:id` */
     if (p.startsWith("/partners/") && p.length > "/partners/".length) return;
+    if (p.startsWith("/funding-accounts")) return;
     navigate("/dashboard", { replace: true });
   }, [token, location.pathname, navigate]);
   useEffect(() => {
@@ -868,6 +983,9 @@ export default function AppClean() {
             <button className={`sideItem ${activePage === "customers" ? "active" : ""}`} onClick={() => navigate("/customers")}>{t("customers")}</button>
             <button className={`sideItem ${activePage === "deposits" ? "active" : ""}`} onClick={() => navigate("/deposits")}>{t("depositModule")}</button>
             <button className={`sideItem ${activePage === "slips" ? "active" : ""}`} onClick={() => navigate("/slips")}>{t("slips")}</button>
+            <button className={`sideItem ${activePage === "fundingAccounts" ? "active" : ""}`} onClick={() => navigate("/funding-accounts")}>
+              {t("fundingAccountsNav")}
+            </button>
             <button className={`sideItem ${activePage === "partners" ? "active" : ""}`} onClick={() => navigate("/partners")}>{t("partners")}</button>
             <button className={`sideItem ${activePage === "reports" ? "active" : ""}`} onClick={() => navigate("/reports")}>{t("reports")}</button>
             {currentUser?.role === "admin" ? (
@@ -899,7 +1017,7 @@ export default function AppClean() {
               />
               <Route
                 path="/customers/:customerId"
-                element={<CustomerDetailPage t={t} apiFetch={apiFetch} currencies={currencies} />}
+                element={<CustomerDetailPage t={t} apiFetch={apiFetch} currencies={currencies} onSlipReviewChange={patchSlipReviewStatus} />}
               />
               <Route path="/customers" element={<CustomersPage t={t} saving={saving} loading={loading} customers={customers} loadCustomers={loadCustomers} onCreateCustomer={onCreateCustomer} onUpdateCustomer={onUpdateCustomer} onDeleteCustomer={onDeleteCustomer} />} />
               <Route
@@ -932,6 +1050,8 @@ export default function AppClean() {
                     t={t}
                     customers={customers}
                     currencies={currencies}
+                    fundingAccounts={fundingAccounts}
+                    slipPartnerAccountOptions={slipPartnerAccountOptions}
                     slipCustomerAccounts={slipCustomerAccounts}
                     slipForm={slipForm}
                     setSlipForm={setSlipForm}
@@ -945,11 +1065,20 @@ export default function AppClean() {
                     setSlipFilters={setSlipFilters}
                     loadSlips={loadSlips}
                     setSlipStatus={setSlipStatus}
+                    patchSlipReviewStatus={patchSlipReviewStatus}
                     slipMutating={slipMutating}
                     onUpdateSlip={onUpdateSlip}
                     onDeleteSlip={onDeleteSlip}
                   />
                 }
+              />
+              <Route
+                path="/funding-accounts"
+                element={<FundingAccountsPage t={t} apiFetch={apiFetch} />}
+              />
+              <Route
+                path="/funding-accounts/:fundingAccountId"
+                element={<FundingAccountDetailPage t={t} apiFetch={apiFetch} currencies={currencies} />}
               />
               <Route
                 path="/partners/:partnerId"

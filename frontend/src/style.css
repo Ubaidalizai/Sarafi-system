@@ -929,6 +929,11 @@ textarea {
   transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
 }
 
+.slipReviewSelect {
+  min-width: 7.5rem;
+  max-width: 12rem;
+}
+
 .sarafiSelect:hover {
   border-color: rgba(0, 168, 168, 0.55);
   background-color: #fff;
@@ -1352,11 +1357,577 @@ textarea {
   font-weight: 650;
 }
 
-.slipRowActions {
+.slipSourceFieldset {
+  border: 1px solid var(--border-subtle, #e5e7eb);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 0 0 12px;
+}
+
+.slipSourceLegend {
+  padding: 0 6px;
+  font-size: 0.85rem;
+  font-weight: 650;
+  color: var(--text-soft);
+}
+
+.slipSourceRadios {
+  display: flex;
   flex-wrap: wrap;
+  gap: 12px 18px;
+}
+
+.slipSourceRadioLabel {
+  display: inline-flex;
+  align-items: center;
   gap: 6px;
-  max-width: 320px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.slipRowActions {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
   justify-content: flex-end;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.iconActionBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 168, 168, 0.28);
+  background: linear-gradient(165deg, rgba(255, 255, 255, 0.96), rgba(243, 252, 252, 0.88));
+  color: #0d3a3a;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.iconActionBtn:hover:not(:disabled) {
+  border-color: rgba(0, 168, 168, 0.45);
+  background: rgba(255, 255, 255, 1);
+}
+
+.iconActionBtn:focus-visible {
+  outline: 3px solid rgba(0, 206, 206, 0.55);
+  outline-offset: 2px;
+}
+
+.iconActionBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.iconActionBtn--danger:hover:not(:disabled) {
+  border-color: rgba(220, 38, 38, 0.45);
+  color: #9b1c1c;
+  background: rgba(254, 242, 242, 0.85);
+}
+
+.iconActionBtn--warn:hover:not(:disabled) {
+  border-color: rgba(217, 119, 6, 0.45);
+  color: #92400e;
+  background: rgba(255, 251, 235, 0.95);
+}
+
+.iconActionBtn--muted:hover:not(:disabled) {
+  border-color: rgba(100, 116, 139, 0.45);
+  color: #334155;
+  background: rgba(248, 250, 252, 0.95);
+}
+
+.fundingAccountRowSelected td {
+  background: rgba(0, 206, 206, 0.09);
+}
+
+.fundingSummaryCell {
+  vertical-align: top;
+  max-width: 280px;
+}
+
+.fundingSummaryList {
+  margin: 0;
+  padding-inline-start: 18px;
+  line-height: 1.45;
+  font-size: 12px;
+}
+
+.fundingNetOwed {
+  color: #b45309;
+  font-weight: 800;
+}
+
+.fundingNetClear {
+  color: #0d3a3a;
+  font-weight: 750;
+}
+
+.fundingMiniTable {
+  margin-top: 8px;
+}
+
+.fundingRepayForm {
+  max-width: 440px;
+}
+
+.fundingDetailSummaries {
+  margin-top: 8px;
+}
+
+.fundingNetCredit {
+  color: #0369a1;
+  font-weight: 800;
+}
+
+.fundingPageMessage {
+  margin-bottom: 10px;
+}
+
+.fundingReportCard .fundingReportSub {
+  margin: 0 0 16px;
+}
+
+.currencyIso {
+  unicode-bidi: isolate;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.fundingReportHeader {
+  margin-bottom: 4px;
+}
+
+.fundingReportTitle {
+  font-size: 1.1rem;
+  margin: 0 0 6px;
+}
+
+.fundingCurrencyKpiBlock {
+  margin-bottom: 18px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid rgba(15, 28, 33, 0.08);
+}
+
+.fundingCurrencyKpiBlock:last-of-type {
+  border-bottom: none;
+  margin-bottom: 12px;
+  padding-bottom: 0;
+}
+
+.fundingCurrencyKpiBlockHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.fundingCurrencyKpiBlockHead .currencyIso {
+  font-size: 16px;
+}
+
+.fundingCurrencyKpiMeta {
+  font-size: 12px;
+  color: #64748b;
+  font-weight: 650;
+}
+
+.fundingCurrencySettledBanner {
+  border: 1px solid rgba(16, 185, 129, 0.32);
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: rgba(236, 253, 245, 0.85);
+}
+
+.fundingCurrencySettledBanner--empty {
+  border-color: rgba(148, 163, 184, 0.35);
+  background: rgba(248, 250, 252, 0.92);
+}
+
+.fundingCurrencySettledBannerTitle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  font-weight: 800;
+  font-size: 14px;
+  color: #0f1c21;
+  margin-bottom: 6px;
+}
+
+.fundingCurrencySettledDash {
+  color: #94a3b8;
+  font-weight: 600;
+}
+
+.fundingCurrencySettledBannerText {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: #334155;
+}
+
+.fundingAggregateStrip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+@media (max-width: 900px) {
+  .fundingAggregateStrip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 480px) {
+  .fundingAggregateStrip {
+    grid-template-columns: 1fr;
+  }
+}
+
+.fundingAggregateCard {
+  border: 1px solid rgba(15, 28, 33, 0.1);
+  border-radius: 12px;
+  padding: 12px 12px 10px;
+  background: rgba(248, 250, 252, 0.72);
+  min-height: 118px;
+  display: flex;
+  flex-direction: column;
+}
+
+.fundingAggregateCardTitle {
+  margin: 0 0 10px;
+  font-size: 12px;
+  font-weight: 850;
+  color: #0f1c21;
+  line-height: 1.35;
+}
+
+.fundingAggregateList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  flex: 1;
+}
+
+.fundingAggregateRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.fundingAggregateCode {
+  flex-shrink: 0;
+}
+
+.fundingAggregateAmount {
+  font-weight: 850;
+  font-variant-numeric: tabular-nums;
+  color: #0f1c21;
+}
+
+.fundingMetricCards {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+@media (max-width: 900px) {
+  .fundingMetricCards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 440px) {
+  .fundingMetricCards {
+    grid-template-columns: 1fr;
+  }
+}
+
+.fundingMetricCard {
+  border: 1px solid rgba(15, 28, 33, 0.1);
+  border-radius: 12px;
+  padding: 12px 12px 10px;
+  background: rgba(255, 255, 255, 0.78);
+  min-height: 108px;
+  display: flex;
+  flex-direction: column;
+}
+
+.fundingMetricCardTitle {
+  margin: 0 0 4px;
+  font-size: 12px;
+  font-weight: 800;
+  color: #0f1c21;
+  line-height: 1.35;
+}
+
+.fundingMetricCardHint {
+  margin: 0 0 10px;
+  font-size: 11px;
+  color: #64748b;
+  line-height: 1.45;
+  flex: 1;
+}
+
+.fundingMetricCardValue {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 850;
+  color: #0f1c21;
+  font-variant-numeric: tabular-nums;
+}
+
+.fundingMetricCardFoot {
+  margin: 8px 0 0;
+  font-size: 11px;
+  color: #0369a1;
+  font-weight: 650;
+}
+
+.fundingLastSlipCard {
+  margin-top: 8px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid rgba(13, 148, 136, 0.28);
+  background: linear-gradient(135deg, rgba(240, 253, 250, 0.92), rgba(255, 255, 255, 0.94));
+}
+
+.fundingLastSlipCardTitle {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 850;
+  color: #0f766e;
+}
+
+.fundingLastSlipCardSub {
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.45;
+}
+
+.fundingLastSlipGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 16px;
+}
+
+@media (max-width: 560px) {
+  .fundingLastSlipGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.fundingLastSlipField {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.fundingLastSlipField--wide {
+  grid-column: 1 / -1;
+}
+
+.fundingLastSlipLabel {
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+}
+
+.fundingLastSlipValue {
+  font-size: 13px;
+  font-weight: 750;
+  color: #0f1c21;
+}
+
+.fundingLastSlipEm {
+  font-size: 15px;
+  font-weight: 850;
+}
+
+.fundingLastSlipLink {
+  font-size: 13px;
+  font-weight: 800;
+  color: #0d9488;
+  text-decoration: none;
+}
+
+.fundingLastSlipLink:hover {
+  text-decoration: underline;
+}
+
+.fundingAccountsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+.fundingAccountCard {
+  border: 1px solid rgba(15, 28, 33, 0.1);
+  border-radius: 14px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.92);
+  display: flex;
+  flex-direction: column;
+}
+
+.fundingAccountCardMain {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 14px 10px;
+  text-decoration: none;
+  color: inherit;
+  flex: 1;
+  transition: background 0.12s ease;
+}
+
+.fundingAccountCardMain:hover {
+  background: rgba(0, 206, 206, 0.06);
+}
+
+.fundingAccountCardHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.fundingAccountCardName {
+  font-weight: 800;
+  font-size: 15px;
+  line-height: 1.35;
+  color: #0f1c21;
+}
+
+.fundingStatusPill {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 750;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 28, 33, 0.12);
+}
+
+.fundingStatusPill--on {
+  background: rgba(16, 185, 129, 0.12);
+  color: #047857;
+  border-color: rgba(16, 185, 129, 0.35);
+}
+
+.fundingStatusPill--off {
+  background: rgba(148, 163, 184, 0.2);
+  color: #475569;
+}
+
+.fundingCardSummaryList {
+  font-size: 12px;
+}
+
+.fundingCardMuted {
+  margin: 0;
+}
+
+.fundingAccountCardCta {
+  font-size: 12px;
+  font-weight: 750;
+  color: #0d9488;
+  margin-top: 4px;
+}
+
+.fundingAccountCardFooter {
+  border-top: 1px solid rgba(15, 28, 33, 0.08);
+  padding: 8px 12px;
+  display: flex;
+  justify-content: flex-end;
+  background: rgba(248, 250, 252, 0.75);
+}
+
+.fundingDetailHeaderBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.fundingBackLink {
+  text-decoration: none;
+}
+
+.fundingDetailHero {
+  margin-bottom: 14px;
+}
+
+.fundingDetailHeroTop {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.fundingFormHint {
+  margin: 6px 0 12px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.iconTooltipAnchor {
+  display: inline-flex;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
+.iconTooltipBubble {
+  position: fixed;
+  z-index: 10050;
+  transform: translateX(-50%);
+  padding: 7px 11px;
+  border-radius: 9px;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.35;
+  white-space: nowrap;
+  max-width: min(280px, calc(100vw - 24px));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  direction: rtl;
+  text-align: center;
+  color: #f8fafc;
+  background: rgba(15, 28, 33, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 10px 28px rgba(15, 28, 33, 0.35);
+  animation: iconTooltipIn 0.12s ease-out;
+}
+
+@keyframes iconTooltipIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .slipDeleteBtn:hover:not(:disabled) {

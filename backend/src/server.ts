@@ -174,16 +174,86 @@ const depositSchema = z.object({
   note: z.string().max(500).optional(),
 });
 
-const issueSlipSchema = z.object({
+const slipResponseInclude = {
+  customer: { select: { id: true, fullName: true, phone: true } },
+  fundingAccount: { select: { id: true, displayName: true } },
+  partnerAccount: {
+    select: {
+      id: true,
+      currencyCode: true,
+      partner: { select: { id: true, name: true } },
+    },
+  },
+} as const;
+
+type SlipLedgerTx = Pick<typeof prisma, "slip" | "partnerAccount" | "partnerTransaction" | "customer">;
+
+const applyPartnerPayoutForSlip = async (
+  tx: SlipLedgerTx,
+  slip: {
+    id: string;
+    slipCode: string;
+    amount: unknown;
+    partnerAccountId: string | null;
+    paidToName: string | null;
+    customerId: string;
+    currencyCode: string;
+  }
+) => {
+  if (!slip.partnerAccountId) return;
+  const existing = await tx.partnerTransaction.findUnique({ where: { slipId: slip.id } });
+  if (existing) return;
+  const pa = await tx.partnerAccount.findUnique({
+    where: { id: slip.partnerAccountId },
+    include: { partner: true },
+  });
+  if (!pa) throw new Error("PARTNER_ACCOUNT_NOT_FOUND");
+  if (pa.currencyCode !== slip.currencyCode) throw new Error("PARTNER_SLIP_CURRENCY_MISMATCH");
+  if (Number(pa.balance) < Number(slip.amount)) throw new Error("INSUFFICIENT_PARTNER_BALANCE");
+  await tx.partnerAccount.update({
+    where: { id: slip.partnerAccountId },
+    data: { balance: { decrement: slip.amount as number } },
+  });
+  const cust = await tx.customer.findUnique({ where: { id: slip.customerId }, select: { fullName: true } });
+  await tx.partnerTransaction.create({
+    data: {
+      partnerId: pa.partnerId,
+      currencyCode: slip.currencyCode,
+      amount: slip.amount as number,
+      direction: "out",
+      beneficiaryName: slip.paidToName?.trim() || cust?.fullName?.trim() || undefined,
+      referenceNo: slip.slipCode,
+      note: "SLIP_PAYOUT",
+      reconciliationStatus: "confirmed",
+      slipId: slip.id,
+    },
+  });
+};
+
+const reversePartnerPayoutForSlip = async (tx: SlipLedgerTx, slipId: string) => {
+  const ptx = await tx.partnerTransaction.findUnique({ where: { slipId } });
+  if (!ptx) return;
+  await tx.partnerAccount.update({
+    where: { partnerId_currencyCode: { partnerId: ptx.partnerId, currencyCode: ptx.currencyCode } },
+    data: { balance: { increment: ptx.amount } },
+  });
+  await tx.partnerTransaction.delete({ where: { id: ptx.id } });
+};
+
+const slipIssueBodySchema = z.object({
   customerId: z.string().min(1),
   currencyCode: z.string().min(2).max(10),
   amount: amountSchema,
-  receiverName: z.string().min(1).max(120),
   paidToName: z.string().min(1).max(120),
   note: z.string().max(500).optional(),
-  /** If true, deduct customer balance immediately and set slip status to paid */
-  markPaid: z.boolean().optional(),
+  fundingAccountId: z.string().min(1).optional(),
+  partnerAccountId: z.string().min(1).optional(),
 });
+
+const issueSlipSchema = slipIssueBodySchema.refine(
+  (d) => Boolean(d.fundingAccountId) !== Boolean(d.partnerAccountId),
+  { message: "SLIP_SOURCE_REQUIRED" }
+);
 
 const payoutSlipSchema = z.object({
   receiverName: z.string().max(120).optional(),
@@ -195,14 +265,43 @@ const slipStatusSchema = z.object({
   status: z.enum(["cancelled", "expired"]),
 });
 
-const updateSlipSchema = z.object({
-  customerId: z.string().min(1),
+const slipReviewStatusSchema = z.object({
+  reviewStatus: z.enum(["waiting", "confirmed", "rejected"]),
+});
+
+const updateSlipSchema = slipIssueBodySchema.refine(
+  (d) => Boolean(d.fundingAccountId) !== Boolean(d.partnerAccountId),
+  { message: "SLIP_SOURCE_REQUIRED" }
+);
+
+const fundingAccountCreateSchema = z.object({
+  displayName: z.string().min(1).max(160),
+  phone: z.string().max(40).optional(),
+  notes: z.string().max(500).optional(),
+});
+
+const fundingAccountUpdateSchema = z.object({
+  displayName: z.string().min(1).max(160).optional(),
+  phone: z.string().max(40).nullable().optional(),
+  notes: z.string().max(500).nullable().optional(),
+  isActive: z.boolean().optional(),
+});
+
+const fundingRepaymentSchema = z.object({
   currencyCode: z.string().min(2).max(10),
   amount: amountSchema,
-  receiverName: z.string().min(1).max(120),
-  paidToName: z.string().min(1).max(120),
   note: z.string().max(500).optional(),
 });
+
+const fundingRepaymentUpdateSchema = z
+  .object({
+    currencyCode: z.string().min(2).max(10).optional(),
+    amount: amountSchema.optional(),
+    note: z.string().max(500).nullable().optional(),
+  })
+  .refine((p) => p.currencyCode !== undefined || p.amount !== undefined || p.note !== undefined, {
+    message: "NOTHING_TO_UPDATE",
+  });
 
 const partnerSchema = z.object({
   name: z.string().min(2).max(120),
@@ -757,11 +856,276 @@ app.delete("/deposits/:depositId", requireAuth, requireRole(["admin", "cashier"]
   res.json({ ok: true });
 });
 
+const buildFundingSummaries = async () => {
+  const slipSums = await prisma.slip.groupBy({
+    by: ["fundingAccountId", "currencyCode"],
+    where: { fundingAccountId: { not: null }, status: "paid" },
+    _sum: { amount: true },
+  });
+  const repSums = await prisma.fundingAccountRepayment.groupBy({
+    by: ["fundingAccountId", "currencyCode"],
+    _sum: { amount: true },
+  });
+  const slipPaidByAccount = new Map<string, Map<string, number>>();
+  for (const row of slipSums) {
+    if (!row.fundingAccountId) continue;
+    const m = slipPaidByAccount.get(row.fundingAccountId) ?? new Map<string, number>();
+    m.set(row.currencyCode, Number(row._sum.amount ?? 0));
+    slipPaidByAccount.set(row.fundingAccountId, m);
+  }
+  const repaidByAccount = new Map<string, Map<string, number>>();
+  for (const row of repSums) {
+    const m = repaidByAccount.get(row.fundingAccountId) ?? new Map<string, number>();
+    m.set(row.currencyCode, Number(row._sum.amount ?? 0));
+    repaidByAccount.set(row.fundingAccountId, m);
+  }
+  return { slipPaidByAccount, repaidByAccount };
+};
+
+app.get("/funding-accounts", requireAuth, async (_req, res) => {
+  const accounts = await prisma.fundingAccount.findMany({
+    orderBy: [{ isActive: "desc" }, { displayName: "asc" }],
+    take: 500,
+  });
+  const { slipPaidByAccount, repaidByAccount } = await buildFundingSummaries();
+  const payload = accounts.map((a) => {
+    const slipM = slipPaidByAccount.get(a.id);
+    const repM = repaidByAccount.get(a.id);
+    const codes = new Set<string>([...(slipM?.keys() ?? []), ...(repM?.keys() ?? [])]);
+    const summaries = [...codes].map((currencyCode) => {
+      const slipPaidTotal = slipM?.get(currencyCode) ?? 0;
+      const repaidTotal = repM?.get(currencyCode) ?? 0;
+      return { currencyCode, slipPaidTotal, repaidTotal, netOwed: slipPaidTotal - repaidTotal };
+    });
+    return { ...a, summaries };
+  });
+  res.json({ ok: true, accounts: payload });
+});
+
+app.post("/funding-accounts", requireAuth, requireRole(["admin", "cashier"]), async (req, res) => {
+  const parsed = fundingAccountCreateSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ ok: false, error: parsed.error.flatten() });
+  const { displayName, phone, notes } = parsed.data;
+  const account = await prisma.fundingAccount.create({
+    data: {
+      displayName: displayName.trim(),
+      phone: phone?.trim() || null,
+      notes: notes?.trim() || null,
+    },
+  });
+  res.status(201).json({ ok: true, account });
+});
+
+app.get("/funding-accounts/:fundingAccountId", requireAuth, async (req, res) => {
+  const fundingAccountId = firstParam(req.params.fundingAccountId);
+  if (!fundingAccountId) return res.status(400).json({ ok: false, error: "INVALID_FUNDING_ACCOUNT_ID" });
+  const account = await prisma.fundingAccount.findUnique({ where: { id: fundingAccountId } });
+  if (!account) return res.status(404).json({ ok: false, error: "FUNDING_ACCOUNT_NOT_FOUND" });
+  const { slipPaidByAccount, repaidByAccount } = await buildFundingSummaries();
+  const slipM = slipPaidByAccount.get(account.id);
+  const repM = repaidByAccount.get(account.id);
+  const codes = new Set<string>([...(slipM?.keys() ?? []), ...(repM?.keys() ?? [])]);
+  const summaries = [...codes].map((currencyCode) => {
+    const slipPaidTotal = slipM?.get(currencyCode) ?? 0;
+    const repaidTotal = repM?.get(currencyCode) ?? 0;
+    return { currencyCode, slipPaidTotal, repaidTotal, netOwed: slipPaidTotal - repaidTotal };
+  });
+  const [slips, repayments] = await Promise.all([
+    prisma.slip.findMany({
+      where: { fundingAccountId },
+      include: slipResponseInclude,
+      orderBy: { createdAt: "desc" },
+      take: 120,
+    }),
+    prisma.fundingAccountRepayment.findMany({
+      where: { fundingAccountId },
+      orderBy: { createdAt: "desc" },
+      take: 120,
+    }),
+  ]);
+
+  let lastPaidSlipRow = await prisma.slip.findFirst({
+    where: { fundingAccountId, status: "paid", paidAt: { not: null } },
+    orderBy: { paidAt: "desc" },
+    include: slipResponseInclude,
+  });
+  if (!lastPaidSlipRow) {
+    lastPaidSlipRow = await prisma.slip.findFirst({
+      where: { fundingAccountId, status: "paid" },
+      orderBy: { createdAt: "desc" },
+      include: slipResponseInclude,
+    });
+  }
+
+  let lastPaidSlip: {
+    slipCode: string;
+    currencyCode: string;
+    amount: number;
+    createdAt: string;
+    paidAt: string | null;
+    customerName: string | null;
+    paidToName: string | null;
+    repaidSinceSlip: number;
+  } | null = null;
+
+  if (lastPaidSlipRow) {
+    const anchor = lastPaidSlipRow.paidAt ?? lastPaidSlipRow.createdAt;
+    const repSum = await prisma.fundingAccountRepayment.aggregate({
+      where: {
+        fundingAccountId,
+        currencyCode: lastPaidSlipRow.currencyCode,
+        createdAt: { gte: anchor },
+      },
+      _sum: { amount: true },
+    });
+    lastPaidSlip = {
+      slipCode: lastPaidSlipRow.slipCode,
+      currencyCode: lastPaidSlipRow.currencyCode,
+      amount: Number(lastPaidSlipRow.amount),
+      createdAt: lastPaidSlipRow.createdAt.toISOString(),
+      paidAt: lastPaidSlipRow.paidAt ? lastPaidSlipRow.paidAt.toISOString() : null,
+      customerName: lastPaidSlipRow.customer?.fullName ?? null,
+      paidToName: lastPaidSlipRow.paidToName?.trim() || null,
+      repaidSinceSlip: Number(repSum._sum.amount ?? 0),
+    };
+  }
+
+  res.json({ ok: true, account, summaries, slips, repayments, lastPaidSlip });
+});
+
+app.patch("/funding-accounts/:fundingAccountId", requireAuth, requireRole(["admin", "cashier"]), async (req, res) => {
+  const fundingAccountId = firstParam(req.params.fundingAccountId);
+  if (!fundingAccountId) return res.status(400).json({ ok: false, error: "INVALID_FUNDING_ACCOUNT_ID" });
+  const parsed = fundingAccountUpdateSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ ok: false, error: parsed.error.flatten() });
+  const exists = await prisma.fundingAccount.findUnique({ where: { id: fundingAccountId } });
+  if (!exists) return res.status(404).json({ ok: false, error: "FUNDING_ACCOUNT_NOT_FOUND" });
+  const data: {
+    displayName?: string;
+    phone?: string | null;
+    notes?: string | null;
+    isActive?: boolean;
+  } = {};
+  if (parsed.data.displayName !== undefined) data.displayName = parsed.data.displayName.trim();
+  if (parsed.data.phone !== undefined) data.phone = parsed.data.phone?.trim() || null;
+  if (parsed.data.notes !== undefined) data.notes = parsed.data.notes?.trim() || null;
+  if (parsed.data.isActive !== undefined) data.isActive = parsed.data.isActive;
+  const account = await prisma.fundingAccount.update({ where: { id: fundingAccountId }, data });
+  res.json({ ok: true, account });
+});
+
+app.delete("/funding-accounts/:fundingAccountId", requireAuth, requireRole(["admin", "cashier"]), async (req, res) => {
+  const fundingAccountId = firstParam(req.params.fundingAccountId);
+  if (!fundingAccountId) return res.status(400).json({ ok: false, error: "INVALID_FUNDING_ACCOUNT_ID" });
+  const [slipCount, repCount] = await Promise.all([
+    prisma.slip.count({ where: { fundingAccountId } }),
+    prisma.fundingAccountRepayment.count({ where: { fundingAccountId } }),
+  ]);
+  if (slipCount > 0 || repCount > 0) {
+    return res.status(409).json({ ok: false, error: "FUNDING_ACCOUNT_NOT_EMPTY" });
+  }
+  await prisma.fundingAccount.delete({ where: { id: fundingAccountId } });
+  res.json({ ok: true });
+});
+
+app.post("/funding-accounts/:fundingAccountId/repayments", requireAuth, requireRole(["admin", "cashier"]), async (req, res) => {
+  const fundingAccountId = firstParam(req.params.fundingAccountId);
+  if (!fundingAccountId) return res.status(400).json({ ok: false, error: "INVALID_FUNDING_ACCOUNT_ID" });
+  const parsed = fundingRepaymentSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ ok: false, error: parsed.error.flatten() });
+  const account = await prisma.fundingAccount.findUnique({ where: { id: fundingAccountId } });
+  if (!account) return res.status(404).json({ ok: false, error: "FUNDING_ACCOUNT_NOT_FOUND" });
+  if (!account.isActive) return res.status(409).json({ ok: false, error: "FUNDING_ACCOUNT_INACTIVE" });
+  const currencyCode = parsed.data.currencyCode.toUpperCase();
+  const cur = await prisma.currency.findUnique({ where: { code: currencyCode } });
+  if (!cur) return res.status(404).json({ ok: false, error: "CURRENCY_NOT_FOUND" });
+  const row = await prisma.fundingAccountRepayment.create({
+    data: {
+      fundingAccountId,
+      currencyCode,
+      amount: parsed.data.amount,
+      note: parsed.data.note?.trim() || null,
+    },
+  });
+  res.status(201).json({ ok: true, repayment: row });
+});
+
+app.patch("/funding-accounts/:fundingAccountId/repayments/:repaymentId", requireAuth, requireRole(["admin", "cashier"]), async (req, res) => {
+  const fundingAccountId = firstParam(req.params.fundingAccountId);
+  const repaymentId = firstParam(req.params.repaymentId);
+  if (!fundingAccountId || !repaymentId) {
+    return res.status(400).json({ ok: false, error: "INVALID_FUNDING_REPAYMENT_PARAMS" });
+  }
+  const parsed = fundingRepaymentUpdateSchema.safeParse(req.body);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0]?.message;
+    if (issue === "NOTHING_TO_UPDATE") return res.status(400).json({ ok: false, error: issue });
+    return res.status(400).json({ ok: false, error: parsed.error.flatten() });
+  }
+  const existing = await prisma.fundingAccountRepayment.findFirst({
+    where: { id: repaymentId, fundingAccountId },
+  });
+  if (!existing) return res.status(404).json({ ok: false, error: "REPAYMENT_NOT_FOUND" });
+  const data: { currencyCode?: string; amount?: number; note?: string | null } = {};
+  if (parsed.data.currencyCode !== undefined) {
+    const cc = parsed.data.currencyCode.toUpperCase();
+    const cur = await prisma.currency.findUnique({ where: { code: cc } });
+    if (!cur) return res.status(404).json({ ok: false, error: "CURRENCY_NOT_FOUND" });
+    data.currencyCode = cc;
+  }
+  if (parsed.data.amount !== undefined) data.amount = parsed.data.amount;
+  if (parsed.data.note !== undefined) data.note = parsed.data.note === null ? null : parsed.data.note?.trim() || null;
+  const repayment = await prisma.fundingAccountRepayment.update({
+    where: { id: repaymentId },
+    data,
+  });
+  res.json({ ok: true, repayment });
+});
+
+app.delete("/funding-accounts/:fundingAccountId/repayments/:repaymentId", requireAuth, requireRole(["admin", "cashier"]), async (req, res) => {
+  const fundingAccountId = firstParam(req.params.fundingAccountId);
+  const repaymentId = firstParam(req.params.repaymentId);
+  if (!fundingAccountId || !repaymentId) {
+    return res.status(400).json({ ok: false, error: "INVALID_FUNDING_REPAYMENT_PARAMS" });
+  }
+  const existing = await prisma.fundingAccountRepayment.findFirst({
+    where: { id: repaymentId, fundingAccountId },
+  });
+  if (!existing) return res.status(404).json({ ok: false, error: "REPAYMENT_NOT_FOUND" });
+  await prisma.fundingAccountRepayment.delete({ where: { id: repaymentId } });
+  res.json({ ok: true });
+});
+
+app.get("/partner-accounts-for-slips", requireAuth, async (req, res) => {
+  const currencyRaw = firstParam(req.query.currencyCode);
+  const currencyCode = currencyRaw ? currencyRaw.toUpperCase() : undefined;
+  const rows = await prisma.partnerAccount.findMany({
+    where: currencyCode ? { currencyCode } : {},
+    include: { partner: { select: { id: true, name: true } } },
+    orderBy: [{ partner: { name: "asc" } }, { currencyCode: "asc" }],
+    take: 500,
+  });
+  res.json({
+    ok: true,
+    accounts: rows.map((a) => ({
+      id: a.id,
+      partnerId: a.partnerId,
+      partnerName: a.partner.name,
+      currencyCode: a.currencyCode,
+      balance: Number(a.balance),
+    })),
+  });
+});
+
 app.post("/slips", requireAuth, requireRole(["admin", "cashier"]), async (req, res) => {
   const parsed = issueSlipSchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ ok: false, error: parsed.error.flatten() });
+  if (!parsed.success) {
+    const slipSrc = parsed.error.issues.find((i) => i.message === "SLIP_SOURCE_REQUIRED");
+    if (slipSrc) return res.status(400).json({ ok: false, error: "SLIP_SOURCE_REQUIRED" });
+    return res.status(400).json({ ok: false, error: parsed.error.flatten() });
+  }
 
-  const { customerId, currencyCode, amount, receiverName, paidToName, note, markPaid } = parsed.data;
+  const { customerId, currencyCode, amount, fundingAccountId, partnerAccountId, paidToName, note } = parsed.data;
   const normalizedCurrency = currencyCode.toUpperCase();
 
   const customer = await prisma.customer.findUnique({ where: { id: customerId } });
@@ -770,25 +1134,12 @@ app.post("/slips", requireAuth, requireRole(["admin", "cashier"]), async (req, r
   const currency = await prisma.currency.findUnique({ where: { code: normalizedCurrency } });
   if (!currency) return res.status(404).json({ ok: false, error: "CURRENCY_NOT_FOUND" });
 
-  if (markPaid === true) {
-    const paid = await prisma.$transaction(async (tx) => {
-      const account = await tx.customerAccount.findUnique({
-        where: {
-          customerId_currencyCode: { customerId, currencyCode: normalizedCurrency },
-        },
-      });
-      if (!account) {
-        throw new Error("NO_ACCOUNT_FOR_SLIP_CURRENCY");
-      }
-      if (Number(account.balance) < Number(amount)) {
-        throw new Error("INSUFFICIENT_BALANCE");
-      }
-      await tx.customerAccount.update({
-        where: {
-          customerId_currencyCode: { customerId, currencyCode: normalizedCurrency },
-        },
-        data: { balance: { decrement: amount } },
-      });
+  if (fundingAccountId) {
+    const funding = await prisma.fundingAccount.findUnique({ where: { id: fundingAccountId } });
+    if (!funding) return res.status(404).json({ ok: false, error: "FUNDING_ACCOUNT_NOT_FOUND" });
+    if (!funding.isActive) return res.status(409).json({ ok: false, error: "FUNDING_ACCOUNT_INACTIVE" });
+
+    const slip = await prisma.$transaction(async (tx) => {
       const slipCode = await nextNumericSlipCode(tx);
       return tx.slip.create({
         data: {
@@ -796,26 +1147,28 @@ app.post("/slips", requireAuth, requireRole(["admin", "cashier"]), async (req, r
           customerId,
           currencyCode: normalizedCurrency,
           amount,
-          receiverName: receiverName.trim(),
+          fundingAccountId,
+          partnerAccountId: null,
+          receiverName: funding.displayName.trim(),
           paidToName: paidToName.trim(),
           note,
-          status: "paid",
-          paidAt: new Date(),
+          status: "issued",
+          reviewStatus: "waiting",
         },
+        include: slipResponseInclude,
       });
-    }).catch((error: Error) => ({ error: error.message }));
+    });
 
-    if ("error" in paid) {
-      if (paid.error === "INSUFFICIENT_BALANCE") {
-        return res.status(409).json({ ok: false, error: "INSUFFICIENT_BALANCE" });
-      }
-      if (paid.error === "NO_ACCOUNT_FOR_SLIP_CURRENCY") {
-        return res.status(409).json({ ok: false, error: paid.error });
-      }
-      return res.status(500).json({ ok: false, error: "SLIP_CREATE_FAILED" });
-    }
+    return res.status(201).json({ ok: true, slip });
+  }
 
-    return res.status(201).json({ ok: true, slip: paid });
+  const pa = await prisma.partnerAccount.findUnique({
+    where: { id: partnerAccountId! },
+    include: { partner: true },
+  });
+  if (!pa) return res.status(404).json({ ok: false, error: "PARTNER_ACCOUNT_NOT_FOUND" });
+  if (pa.currencyCode !== normalizedCurrency) {
+    return res.status(409).json({ ok: false, error: "PARTNER_SLIP_CURRENCY_MISMATCH" });
   }
 
   const slip = await prisma.$transaction(async (tx) => {
@@ -826,11 +1179,15 @@ app.post("/slips", requireAuth, requireRole(["admin", "cashier"]), async (req, r
         customerId,
         currencyCode: normalizedCurrency,
         amount,
-        receiverName: receiverName.trim(),
+        fundingAccountId: null,
+        partnerAccountId: pa.id,
+        receiverName: pa.partner.name.trim(),
         paidToName: paidToName.trim(),
         note,
         status: "issued",
+        reviewStatus: "waiting",
       },
+      include: slipResponseInclude,
     });
   });
 
@@ -842,9 +1199,7 @@ app.get("/slips/:slipCode", requireAuth, async (req, res) => {
   if (!slipCode) return res.status(400).json({ ok: false, error: "INVALID_SLIP_CODE" });
   const slip = await prisma.slip.findUnique({
     where: { slipCode },
-    include: {
-      customer: { select: { id: true, fullName: true, phone: true } },
-    },
+    include: slipResponseInclude,
   });
 
   if (!slip) return res.status(404).json({ ok: false, error: "SLIP_NOT_FOUND" });
@@ -853,6 +1208,7 @@ app.get("/slips/:slipCode", requireAuth, async (req, res) => {
 
 app.get("/slips", requireAuth, async (req, res) => {
   const status = firstParam(req.query.status);
+  const reviewStatus = firstParam(req.query.reviewStatus);
   const customerId = firstParam(req.query.customerId);
   const currencyRaw = firstParam(req.query.currencyCode);
   const currencyCode = currencyRaw ? currencyRaw.toUpperCase() : undefined;
@@ -862,6 +1218,9 @@ app.get("/slips", requireAuth, async (req, res) => {
   const slips = await prisma.slip.findMany({
     where: {
       ...(status && ["issued", "paid", "cancelled", "expired"].includes(status) ? { status: status as "issued" | "paid" | "cancelled" | "expired" } : {}),
+      ...(reviewStatus && ["waiting", "confirmed", "rejected"].includes(reviewStatus)
+        ? { reviewStatus: reviewStatus as "waiting" | "confirmed" | "rejected" }
+        : {}),
       ...(customerId ? { customerId } : {}),
       ...(currencyCode ? { currencyCode } : {}),
       ...((from || to)
@@ -873,9 +1232,7 @@ app.get("/slips", requireAuth, async (req, res) => {
           }
         : {}),
     },
-    include: {
-      customer: { select: { id: true, fullName: true, phone: true } },
-    },
+    include: slipResponseInclude,
     orderBy: { createdAt: "desc" },
     take: 300,
   });
@@ -893,6 +1250,7 @@ app.post("/slips/:slipCode/payout", requireAuth, requireRole(["admin", "cashier"
   const result = await prisma.$transaction(async (tx) => {
     const slip = await tx.slip.findUnique({ where: { slipCode } });
     if (!slip) throw new Error("SLIP_NOT_FOUND");
+    if (slip.reviewStatus !== "confirmed") throw new Error("SLIP_REVIEW_NOT_CONFIRMED");
     if (slip.status !== "issued") throw new Error("SLIP_NOT_PAYABLE");
 
     const account = await tx.customerAccount.findUnique({
@@ -930,7 +1288,10 @@ app.post("/slips/:slipCode/payout", requireAuth, requireRole(["admin", "cashier"
         paidToName: parsed.data.paidToName !== undefined ? parsed.data.paidToName?.trim() || null : slip.paidToName,
         note: parsed.data.note ?? slip.note,
       },
+      include: slipResponseInclude,
     });
+
+    await applyPartnerPayoutForSlip(tx, paidSlip);
 
     return { paidSlip, updatedAccount };
   }).catch((error: Error) => {
@@ -939,9 +1300,16 @@ app.post("/slips/:slipCode/payout", requireAuth, requireRole(["admin", "cashier"
 
   if ("error" in result) {
     if (result.error === "SLIP_NOT_FOUND") return res.status(404).json({ ok: false, error: result.error });
+    if (result.error === "SLIP_REVIEW_NOT_CONFIRMED") return res.status(409).json({ ok: false, error: result.error });
     if (result.error === "SLIP_NOT_PAYABLE") return res.status(409).json({ ok: false, error: result.error });
     if (result.error === "INSUFFICIENT_BALANCE") return res.status(409).json({ ok: false, error: result.error });
     if (result.error === "NO_ACCOUNT_FOR_SLIP_CURRENCY") {
+      return res.status(409).json({ ok: false, error: result.error });
+    }
+    if (result.error === "INSUFFICIENT_PARTNER_BALANCE") {
+      return res.status(409).json({ ok: false, error: result.error });
+    }
+    if (result.error === "PARTNER_ACCOUNT_NOT_FOUND" || result.error === "PARTNER_SLIP_CURRENCY_MISMATCH") {
       return res.status(409).json({ ok: false, error: result.error });
     }
     return res.status(500).json({ ok: false, error: "PAYOUT_FAILED" });
@@ -964,8 +1332,139 @@ app.patch("/slips/:slipCode/status", requireAuth, requireRole(["admin", "cashier
   const updated = await prisma.slip.update({
     where: { slipCode },
     data: { status: parsed.data.status },
+    include: slipResponseInclude,
   });
   res.json({ ok: true, slip: updated });
+});
+
+app.patch("/slips/:slipCode/review", requireAuth, requireRole(["admin", "cashier", "accountant"]), async (req, res) => {
+  const parsed = slipReviewStatusSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ ok: false, error: parsed.error.flatten() });
+
+  const slipCode = firstParam(req.params.slipCode);
+  if (!slipCode) return res.status(400).json({ ok: false, error: "INVALID_SLIP_CODE" });
+
+  const next = parsed.data.reviewStatus;
+
+  const result = await prisma.$transaction(async (tx) => {
+    const s = await tx.slip.findUnique({ where: { slipCode } });
+    if (!s) throw new Error("SLIP_NOT_FOUND");
+    if (s.status === "cancelled" || s.status === "expired") throw new Error("SLIP_BAD_STATE");
+
+    const prev = s.reviewStatus;
+    if (next === prev) {
+      const unchanged = await tx.slip.findUnique({
+        where: { slipCode },
+        include: slipResponseInclude,
+      });
+      if (!unchanged) throw new Error("SLIP_NOT_FOUND");
+      return unchanged;
+    }
+
+    if (next === "confirmed") {
+      if (s.status === "paid") {
+        return tx.slip.update({
+          where: { slipCode },
+          data: { reviewStatus: "confirmed" },
+          include: slipResponseInclude,
+        });
+      }
+      if (s.status === "issued") {
+        const account = await tx.customerAccount.findUnique({
+          where: {
+            customerId_currencyCode: {
+              customerId: s.customerId,
+              currencyCode: s.currencyCode,
+            },
+          },
+        });
+        if (!account) throw new Error("NO_ACCOUNT_FOR_SLIP_CURRENCY");
+        if (Number(account.balance) < Number(s.amount)) throw new Error("INSUFFICIENT_BALANCE");
+        await tx.customerAccount.update({
+          where: {
+            customerId_currencyCode: {
+              customerId: s.customerId,
+              currencyCode: s.currencyCode,
+            },
+          },
+          data: { balance: { decrement: s.amount } },
+        });
+        const paidSlip = await tx.slip.update({
+          where: { slipCode },
+          data: {
+            reviewStatus: "confirmed",
+            status: "paid",
+            paidAt: new Date(),
+          },
+          include: slipResponseInclude,
+        });
+        await applyPartnerPayoutForSlip(tx, paidSlip);
+        return paidSlip;
+      }
+      throw new Error("SLIP_BAD_STATE");
+    }
+
+    if (next === "waiting" || next === "rejected") {
+      if (s.status === "paid") {
+        await reversePartnerPayoutForSlip(tx, s.id);
+        await tx.customerAccount.update({
+          where: {
+            customerId_currencyCode: {
+              customerId: s.customerId,
+              currencyCode: s.currencyCode,
+            },
+          },
+          data: { balance: { increment: s.amount } },
+        });
+        if (next === "waiting") {
+          return tx.slip.update({
+            where: { slipCode },
+            data: {
+              reviewStatus: "waiting",
+              status: "issued",
+              paidAt: null,
+            },
+            include: slipResponseInclude,
+          });
+        }
+        return tx.slip.update({
+          where: { slipCode },
+          data: {
+            reviewStatus: "rejected",
+            status: "cancelled",
+            paidAt: null,
+          },
+          include: slipResponseInclude,
+        });
+      }
+      return tx.slip.update({
+        where: { slipCode },
+        data: { reviewStatus: next },
+        include: slipResponseInclude,
+      });
+    }
+
+    throw new Error("SLIP_BAD_STATE");
+  }).catch((error: Error) => ({ error: error.message }));
+
+  if ("error" in result) {
+    if (result.error === "SLIP_NOT_FOUND") return res.status(404).json({ ok: false, error: result.error });
+    if (result.error === "INSUFFICIENT_BALANCE") return res.status(409).json({ ok: false, error: result.error });
+    if (result.error === "NO_ACCOUNT_FOR_SLIP_CURRENCY") {
+      return res.status(409).json({ ok: false, error: result.error });
+    }
+    if (result.error === "INSUFFICIENT_PARTNER_BALANCE") {
+      return res.status(409).json({ ok: false, error: result.error });
+    }
+    if (result.error === "PARTNER_ACCOUNT_NOT_FOUND" || result.error === "PARTNER_SLIP_CURRENCY_MISMATCH") {
+      return res.status(409).json({ ok: false, error: result.error });
+    }
+    if (result.error === "SLIP_BAD_STATE") return res.status(409).json({ ok: false, error: result.error });
+    return res.status(500).json({ ok: false, error: "SLIP_REVIEW_UPDATE_FAILED" });
+  }
+
+  if (!result) return res.status(500).json({ ok: false, error: "SLIP_REVIEW_UPDATE_FAILED" });
+  res.json({ ok: true, slip: result });
 });
 
 app.put("/slips/:slipCode", requireAuth, requireRole(["admin", "cashier"]), async (req, res) => {
@@ -973,7 +1472,11 @@ app.put("/slips/:slipCode", requireAuth, requireRole(["admin", "cashier"]), asyn
   if (!slipCode) return res.status(400).json({ ok: false, error: "INVALID_SLIP_CODE" });
 
   const parsed = updateSlipSchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ ok: false, error: parsed.error.flatten() });
+  if (!parsed.success) {
+    const slipSrc = parsed.error.issues.find((i) => i.message === "SLIP_SOURCE_REQUIRED");
+    if (slipSrc) return res.status(400).json({ ok: false, error: "SLIP_SOURCE_REQUIRED" });
+    return res.status(400).json({ ok: false, error: parsed.error.flatten() });
+  }
 
   const existing = await prisma.slip.findUnique({ where: { slipCode } });
   if (!existing) return res.status(404).json({ ok: false, error: "SLIP_NOT_FOUND" });
@@ -981,7 +1484,7 @@ app.put("/slips/:slipCode", requireAuth, requireRole(["admin", "cashier"]), asyn
     return res.status(409).json({ ok: false, error: "SLIP_NOT_EDITABLE" });
   }
 
-  const { customerId, currencyCode, amount, receiverName, paidToName, note } = parsed.data;
+  const { customerId, currencyCode, amount, fundingAccountId, partnerAccountId, paidToName, note } = parsed.data;
   const normalizedCurrency = currencyCode.toUpperCase();
 
   const customer = await prisma.customer.findUnique({ where: { id: customerId } });
@@ -989,19 +1492,51 @@ app.put("/slips/:slipCode", requireAuth, requireRole(["admin", "cashier"]), asyn
   const currency = await prisma.currency.findUnique({ where: { code: normalizedCurrency } });
   if (!currency) return res.status(404).json({ ok: false, error: "CURRENCY_NOT_FOUND" });
 
+  if (fundingAccountId) {
+    const funding = await prisma.fundingAccount.findUnique({ where: { id: fundingAccountId } });
+    if (!funding) return res.status(404).json({ ok: false, error: "FUNDING_ACCOUNT_NOT_FOUND" });
+    if (!funding.isActive) return res.status(409).json({ ok: false, error: "FUNDING_ACCOUNT_INACTIVE" });
+
+    const slip = await prisma.slip.update({
+      where: { slipCode },
+      data: {
+        customerId,
+        currencyCode: normalizedCurrency,
+        amount,
+        fundingAccountId,
+        partnerAccountId: null,
+        receiverName: funding.displayName.trim(),
+        paidToName: paidToName.trim(),
+        note: note?.trim() || null,
+      },
+      include: slipResponseInclude,
+    });
+
+    return res.json({ ok: true, slip });
+  }
+
+  const pa = await prisma.partnerAccount.findUnique({
+    where: { id: partnerAccountId! },
+    include: { partner: true },
+  });
+  if (!pa) return res.status(404).json({ ok: false, error: "PARTNER_ACCOUNT_NOT_FOUND" });
+  if (pa.currencyCode !== normalizedCurrency) {
+    return res.status(409).json({ ok: false, error: "PARTNER_SLIP_CURRENCY_MISMATCH" });
+  }
+
   const slip = await prisma.slip.update({
     where: { slipCode },
     data: {
       customerId,
       currencyCode: normalizedCurrency,
       amount,
-      receiverName: receiverName.trim(),
+      fundingAccountId: null,
+      partnerAccountId: pa.id,
+      receiverName: pa.partner.name.trim(),
       paidToName: paidToName.trim(),
       note: note?.trim() || null,
     },
-    include: {
-      customer: { select: { id: true, fullName: true, phone: true } },
-    },
+    include: slipResponseInclude,
   });
 
   res.json({ ok: true, slip });
@@ -1016,6 +1551,7 @@ app.delete("/slips/:slipCode", requireAuth, requireRole(["admin", "cashier"]), a
       const slip = await tx.slip.findUnique({ where: { slipCode } });
       if (!slip) throw new Error("SLIP_NOT_FOUND");
       if (slip.status === "paid") {
+        await reversePartnerPayoutForSlip(tx, slip.id);
         await tx.customerAccount.upsert({
           where: {
             customerId_currencyCode: {
@@ -1133,6 +1669,7 @@ app.get("/partner-transactions", requireAuth, async (req, res) => {
     },
     include: {
       partner: { select: { id: true, name: true, country: true, city: true } },
+      slip: { select: { slipCode: true, paidAt: true, createdAt: true, customer: { select: { fullName: true } } } },
     },
     orderBy: { createdAt: "desc" },
     take: 300,
@@ -1240,6 +1777,7 @@ app.put("/partner-transactions/:txId", requireAuth, requireRole(["admin", "accou
   const result = await prisma.$transaction(async (tx) => {
     const existing = await tx.partnerTransaction.findUnique({ where: { id: txId } });
     if (!existing) throw new Error("PARTNER_TX_NOT_FOUND");
+    if (existing.slipId) throw new Error("PARTNER_TX_SLIP_LINKED_LOCKED");
 
     await tx.partnerAccount.upsert({
       where: { partnerId_currencyCode: { partnerId: existing.partnerId, currencyCode: existing.currencyCode } },
@@ -1291,6 +1829,9 @@ app.put("/partner-transactions/:txId", requireAuth, requireRole(["admin", "accou
     if (result.error === "PARTNER_TX_NOT_FOUND") {
       return res.status(404).json({ ok: false, error: result.error });
     }
+    if (result.error === "PARTNER_TX_SLIP_LINKED_LOCKED") {
+      return res.status(409).json({ ok: false, error: result.error });
+    }
     // eslint-disable-next-line no-console
     console.error("PARTNER_TX_UPDATE_FAILED", result.error);
     return res.status(500).json({ ok: false, error: "PARTNER_TX_UPDATE_FAILED", details: result.error });
@@ -1306,6 +1847,7 @@ app.delete("/partner-transactions/:txId", requireAuth, requireRole(["admin", "ac
   const result = await prisma.$transaction(async (tx) => {
     const existing = await tx.partnerTransaction.findUnique({ where: { id: txId } });
     if (!existing) throw new Error("PARTNER_TX_NOT_FOUND");
+    if (existing.slipId) throw new Error("PARTNER_TX_SLIP_LINKED_LOCKED");
 
     await tx.partnerAccount.upsert({
       where: { partnerId_currencyCode: { partnerId: existing.partnerId, currencyCode: existing.currencyCode } },
@@ -1330,6 +1872,9 @@ app.delete("/partner-transactions/:txId", requireAuth, requireRole(["admin", "ac
   if ("error" in result) {
     if (result.error === "PARTNER_TX_NOT_FOUND") {
       return res.status(404).json({ ok: false, error: result.error });
+    }
+    if (result.error === "PARTNER_TX_SLIP_LINKED_LOCKED") {
+      return res.status(409).json({ ok: false, error: result.error });
     }
     // eslint-disable-next-line no-console
     console.error("PARTNER_TX_DELETE_FAILED", result.error);
