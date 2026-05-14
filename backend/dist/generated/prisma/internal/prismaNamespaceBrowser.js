@@ -48,7 +48,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.NullsOrder = exports.SortOrder = exports.PartnerTransactionScalarFieldEnum = exports.PartnerAccountScalarFieldEnum = exports.PartnerScalarFieldEnum = exports.SlipScalarFieldEnum = exports.DepositTransactionScalarFieldEnum = exports.CustomerAccountScalarFieldEnum = exports.ExchangeTransactionScalarFieldEnum = exports.CustomerScalarFieldEnum = exports.CurrencyScalarFieldEnum = exports.UserScalarFieldEnum = exports.TransactionIsolationLevel = exports.ModelName = exports.AnyNull = exports.JsonNull = exports.DbNull = exports.NullTypes = exports.Decimal = void 0;
+exports.NullsOrder = exports.SortOrder = exports.PartnerTransactionScalarFieldEnum = exports.PartnerAccountScalarFieldEnum = exports.PartnerScalarFieldEnum = exports.FundingAccountRepaymentScalarFieldEnum = exports.FundingAccountScalarFieldEnum = exports.SlipScalarFieldEnum = exports.DepositTransactionScalarFieldEnum = exports.CustomerAccountScalarFieldEnum = exports.ExchangeTransactionScalarFieldEnum = exports.CustomerScalarFieldEnum = exports.CurrencyScalarFieldEnum = exports.UserScalarFieldEnum = exports.TransactionIsolationLevel = exports.ModelName = exports.AnyNull = exports.JsonNull = exports.DbNull = exports.NullTypes = exports.Decimal = void 0;
 const runtime = __importStar(require("@prisma/client/runtime/index-browser"));
 exports.Decimal = runtime.Decimal;
 exports.NullTypes = {
@@ -82,6 +82,8 @@ exports.ModelName = {
     CustomerAccount: 'CustomerAccount',
     DepositTransaction: 'DepositTransaction',
     Slip: 'Slip',
+    FundingAccount: 'FundingAccount',
+    FundingAccountRepayment: 'FundingAccountRepayment',
     Partner: 'Partner',
     PartnerAccount: 'PartnerAccount',
     PartnerTransaction: 'PartnerTransaction'
@@ -156,13 +158,33 @@ exports.SlipScalarFieldEnum = {
     customerId: 'customerId',
     currencyCode: 'currencyCode',
     amount: 'amount',
+    fundingAccountId: 'fundingAccountId',
+    partnerAccountId: 'partnerAccountId',
     receiverName: 'receiverName',
     paidToName: 'paidToName',
     note: 'note',
     status: 'status',
+    reviewStatus: 'reviewStatus',
     paidAt: 'paidAt',
     createdAt: 'createdAt',
     updatedAt: 'updatedAt'
+};
+exports.FundingAccountScalarFieldEnum = {
+    id: 'id',
+    displayName: 'displayName',
+    phone: 'phone',
+    notes: 'notes',
+    isActive: 'isActive',
+    createdAt: 'createdAt',
+    updatedAt: 'updatedAt'
+};
+exports.FundingAccountRepaymentScalarFieldEnum = {
+    id: 'id',
+    fundingAccountId: 'fundingAccountId',
+    currencyCode: 'currencyCode',
+    amount: 'amount',
+    note: 'note',
+    createdAt: 'createdAt'
 };
 exports.PartnerScalarFieldEnum = {
     id: 'id',
@@ -192,6 +214,7 @@ exports.PartnerTransactionScalarFieldEnum = {
     referenceNo: 'referenceNo',
     note: 'note',
     reconciliationStatus: 'reconciliationStatus',
+    slipId: 'slipId',
     createdAt: 'createdAt'
 };
 exports.SortOrder = {

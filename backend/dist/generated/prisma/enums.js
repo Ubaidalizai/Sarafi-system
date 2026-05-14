@@ -9,7 +9,7 @@
 * 🟢 You can import this file directly.
 */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.ReconciliationStatus = exports.PartnerTxDirection = exports.SlipStatus = exports.UserRole = void 0;
+exports.ReconciliationStatus = exports.PartnerTxDirection = exports.SlipReviewStatus = exports.SlipStatus = exports.UserRole = void 0;
 exports.UserRole = {
     admin: 'admin',
     cashier: 'cashier',
@@ -20,6 +20,11 @@ exports.SlipStatus = {
     paid: 'paid',
     cancelled: 'cancelled',
     expired: 'expired'
+};
+exports.SlipReviewStatus = {
+    waiting: 'waiting',
+    confirmed: 'confirmed',
+    rejected: 'rejected'
 };
 exports.PartnerTxDirection = {
     in: 'in',
