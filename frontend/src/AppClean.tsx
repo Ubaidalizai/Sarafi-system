@@ -246,7 +246,7 @@ export default function AppClean() {
     } finally {
       setSlipsLoading(false);
     }
-  }, []);
+  }, [apiFetch]);
 
   const loadFundingAccounts = useCallback(async () => {
     const r = await apiFetch(apiUrl("/funding-accounts"));
@@ -970,7 +970,19 @@ export default function AppClean() {
         <aside className="sidebar">
           <div className="sideTop">
             <div className="brand sideBrand">
-              <div className="brandMark" aria-hidden="true" />
+              <div className="brandMark" aria-hidden="true">
+                <svg className="brandMarkIcon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path
+                    d="M4.5 8.25h15a1.25 1.25 0 0 1 1.25 1.25v5a1.25 1.25 0 0 1-1.25 1.25h-15a1.25 1.25 0 0 1-1.25-1.25v-5A1.25 1.25 0 0 1 4.5 8.25Z"
+                    stroke="rgba(255,255,255,0.95)"
+                    strokeWidth="1.35"
+                    strokeLinejoin="round"
+                  />
+                  <path d="M6.75 8.25V7a1.25 1.25 0 0 1 1.25-1.25h8a1.25 1.25 0 0 1 1.25 1.25v1.25" stroke="rgba(255,255,255,0.55)" strokeWidth="1.2" strokeLinecap="round" />
+                  <circle cx="12" cy="12" r="2.35" stroke="rgba(255,255,255,0.95)" strokeWidth="1.25" />
+                  <path d="M8.5 12h-1M16.5 12h-1" stroke="rgba(255,255,255,0.75)" strokeWidth="1.2" strokeLinecap="round" />
+                </svg>
+              </div>
               <div className="brandText">
                 <div className="brandName">{t("appName")}</div>
                 <div className="brandSub">{currentUser?.username}</div>
